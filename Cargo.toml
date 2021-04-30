@@ -1,0 +1,16 @@
+[package]
+name = "rowantlr"
+version = "0.1.0"
+authors = ["Xie Ruifeng <ruifengx@outlook.com>"]
+edition = "2018"
+repository = "https://github.com/ruifengx/rowantlr.git"
+homepage = "https://github.com/ruifengx/rowantlr.git"
+license = "AGPL-3.0-or-later"
+readme = "README.md"
+description = "An ANTLR like parser generator framework targetting rowan."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+itertools = "0.10"
+derivative = "2.2"
