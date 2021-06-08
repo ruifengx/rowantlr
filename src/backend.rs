@@ -16,15 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! rowantlr: ANTLR-like parser generator framework targetting rowan.
+//! All the possible backends for rowantlr.
 
-#![warn(missing_docs)]
-
-#[macro_use]
-pub mod utils;
-
-pub mod ir;
-pub mod backend;
-
-#[cfg(test)]
-mod tests {}
+pub mod ll1;

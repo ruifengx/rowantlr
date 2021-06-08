@@ -33,8 +33,9 @@ pub enum Symbol<A> {
     /// Index 0 reserved for the special start symbol `S`, which is not allowed to be referenced
     /// in RHS of any production rules, and thus here ruled out as a non-terminal symbol.
     ///
-    /// Use [`nonzero`] to for `NonZeroUsize` literals.
-    NonTerminal(NonZeroUsize),
+    /// Use a [`NonTerminalIdx`] from `Grammar::add_non_terminal` instead of manually constructing
+    /// a [`NonTerminalIdx`]. For test purposes only, use [`NonTerminal`](crate::NonTerminal).
+    NonTerminal(NonTerminalIdx),
 }
 
 impl<A: Display> Display for Symbol<A> {
@@ -49,6 +50,9 @@ impl<A: Display> Display for Symbol<A> {
 /// Expressions are sequences of [`Symbol::Terminal`]s and [`Symbol::NonTerminal`]s.
 pub type Expr<A> = Vec<Symbol<A>>;
 
+/// Expression for empty strings (ε).
+pub fn epsilon<A>() -> Expr<A> { Vec::new() }
+
 /// Expressions with carets.
 ///
 /// e.g. to represent RHS of a production rule `A -> a A b` (caret written as dot):
@@ -57,10 +61,8 @@ pub type Expr<A> = Vec<Symbol<A>>;
 ///
 /// ```
 /// use std::num::NonZeroUsize;
-/// # use rowantlr::ir::grammar::CaretExpr;
-/// # use rowantlr::ir::grammar::Symbol::*;
-/// # use rowantlr::nonzero;
-/// let expr = vec![Terminal('a'), NonTerminal(nonzero!(1)), Terminal('b')];
+/// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
+/// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
 /// let c_expr = CaretExpr::from(&expr);
 /// assert_eq!(" . a 1 b", format!("{}", c_expr));
 /// ```
@@ -88,14 +90,23 @@ impl<'a, A: Display> Display for CaretExpr<'a, A> {
 }
 
 impl<'a, A> CaretExpr<'a, A> {
+    /// Create a new [`CaretExpr`].
+    ///
+    /// ```
+    /// use std::num::NonZeroUsize;
+    /// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
+    /// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
+    /// let c_expr = CaretExpr::from(&expr);
+    /// assert_eq!(" . a 1 b", format!("{}", c_expr));
+    /// ```
+    pub fn new(expr: &'a Expr<A>) -> Self { CaretExpr::from(expr) }
+
     /// Step the caret, return the [`Symbol`] we just step across and a new [`CaretExpr`].
     ///
     /// ```
     /// use std::num::NonZeroUsize;
-    /// # use rowantlr::ir::grammar::CaretExpr;
-    /// # use rowantlr::ir::grammar::Symbol::*;
-    /// # use rowantlr::nonzero;
-    /// let expr = vec![Terminal('a'), NonTerminal(nonzero!(1)), Terminal('b')];
+    /// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
+    /// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
     /// let c_expr = CaretExpr::from(&expr);
     /// let (_, c_expr) = c_expr.step().unwrap();
     /// assert_eq!("a . 1 b", format!("{}", c_expr));
@@ -107,6 +118,30 @@ impl<'a, A> CaretExpr<'a, A> {
             components: self.components,
         }))
     }
+
+    /// Consumed part: this is usually not useful, exposed for completeness anyways.
+    ///
+    /// ```
+    /// use std::num::NonZeroUsize;
+    /// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
+    /// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
+    /// let c_expr = CaretExpr::from(&expr);
+    /// let (_, c_expr) = c_expr.step().unwrap();
+    /// assert_eq!(&[Terminal('a')], c_expr.consumed_part());
+    /// ```
+    pub fn consumed_part(&self) -> &[Symbol<A>] { &self.components[..self.caret] }
+
+    /// Symbols yet to consume.
+    ///
+    /// ```
+    /// use std::num::NonZeroUsize;
+    /// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
+    /// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
+    /// let c_expr = CaretExpr::from(&expr);
+    /// let (_, c_expr) = c_expr.step().unwrap();
+    /// assert_eq!(&[NonTerminal!(1), Terminal('b')], c_expr.rest_part());
+    /// ```
+    pub fn rest_part(&self) -> &[Symbol<A>] { &self.components[self.caret..] }
 }
 
 /// (Augmented) Grammars, i.e. set of production rules, with a start symbol `S` (indexed 0) not
@@ -117,12 +152,24 @@ pub struct Grammar<A> {
 }
 
 /// Wrapped non-terminal, subscript into [`Grammar`]s.
-pub struct NonTerminalIdx(usize);
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct NonTerminalIdx(pub NonZeroUsize);
+
+impl Display for NonTerminalIdx {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl<A> Default for Grammar<A> {
     fn default() -> Self {
         Grammar { rules: vec![Vec::new()] }
     }
+}
+
+impl NonTerminalIdx {
+    /// Get as a [`usize`].
+    pub fn get(self) -> usize { self.0.get() }
 }
 
 impl<A> Grammar<A> {
@@ -133,17 +180,32 @@ impl<A> Grammar<A> {
     pub fn add_non_terminal(&mut self) -> NonTerminalIdx {
         let nt = self.rules.len();
         self.rules.push(Vec::new());
-        NonTerminalIdx(nt)
+        NonTerminalIdx(NonZeroUsize::new(nt).unwrap())
+    }
+
+    /// Add many new non-terminals all at once.
+    pub fn add_non_terminals<const N: usize>(&mut self) -> [NonTerminalIdx; N] {
+        let mut res = [NonTerminalIdx(nonzero!(42)); N];
+        for i in 0..N {
+            res[i] = self.add_non_terminal();
+        }
+        res
     }
 
     /// Add a new production rule to a non-terminal.
     pub fn add_rule(&mut self, nt: NonTerminalIdx, rule: Expr<A>) {
-        self.rules[nt.0].push(rule)
+        self.rules[nt.get()].push(rule)
     }
 
     /// Mark a non-terminal symbol as a start symbol.
     pub fn mark_as_start(&mut self, nt: NonTerminalIdx) {
-        let nt = Symbol::NonTerminal(NonZeroUsize::new(nt.0).unwrap());
+        let nt = Symbol::NonTerminal(nt);
         self.rules[0].push(vec![nt])
+    }
+
+    /// Iterate over all the production rules in the grammar.
+    pub fn rules_iter(&self) -> impl Iterator<Item=(usize, &[Symbol<A>])> {
+        self.rules.iter().enumerate()
+            .flat_map(|(n, e)| e.iter().map(move |x| (n, &x[..])))
     }
 }
