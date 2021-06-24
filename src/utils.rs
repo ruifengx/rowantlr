@@ -38,6 +38,33 @@ macro_rules! r#box {
     }
 }
 
+/// Compare references as if they were raw pointers.
+pub mod by_address {
+    use std::cmp::Ordering;
+
+    /// Fast-forward to [`PartialOrd`] for pointers. To be used by `Derivative`.
+    #[inline(always)]
+    pub fn eq<T: ?Sized>(x: &&T, y: &&T) -> bool {
+        std::ptr::eq(*x, *y)
+    }
+
+    /// Fast-forward to [`PartialOrd`] for pointers. To be used by `Derivative`.
+    #[inline(always)]
+    pub fn partial_cmp<T: ?Sized>(x: &&T, y: &&T) -> Option<Ordering> {
+        let x: *const T = *x;
+        let y: *const T = *y;
+        x.partial_cmp(&y)
+    }
+
+    /// Fast-forward to [`Ord`] for pointers. To be used by `Derivative`.
+    #[inline(always)]
+    pub fn cmp<T: ?Sized>(x: &&T, y: &&T) -> Ordering {
+        let x: *const T = *x;
+        let y: *const T = *y;
+        x.cmp(&y)
+    }
+}
+
 /// Continue folding if the condition holds.
 ///
 /// ```

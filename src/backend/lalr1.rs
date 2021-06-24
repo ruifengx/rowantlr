@@ -16,7 +16,26 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! All the possible backends for rowantlr.
+//! `LALR(1)` backend for rowantlr and related stuffs.
 
-pub mod ll1;
-pub mod lalr1;
+use crate::ir::grammar::{Grammar, CaretExpr};
+use std::collections::{BTreeSet, VecDeque};
+
+/// The `CLOSURE` of an item set.
+pub fn closure<'a, A>(
+    g: &'a Grammar<A>,
+    s: impl Iterator<Item=&'a CaretExpr<'a, A>>,
+) -> BTreeSet<CaretExpr<A>> {
+    let mut res = s.copied().collect::<BTreeSet<_>>();
+    let mut queue = VecDeque::new();
+    queue.extend(res.iter().copied().filter_map(CaretExpr::next_non_terminal));
+    while let Some(x) = queue.pop_front() {
+        for x in g.rules_of(x).iter().map(CaretExpr::new) {
+            if !res.insert(x) { continue; }
+            if let Some(nt) = x.next_non_terminal() {
+                queue.push_back(nt);
+            }
+        }
+    }
+    res
+}

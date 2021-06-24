@@ -23,6 +23,8 @@ use std::num::NonZeroUsize;
 use derivative::Derivative;
 use itertools::Itertools;
 
+use crate::utils::by_address;
+
 /// Terminal and non-terminal symbols.
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
 pub enum Symbol<A> {
@@ -67,14 +69,20 @@ pub fn epsilon<A>() -> Expr<A> { Box::new([]) as _ }
 ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
 ///     let c_expr = CaretExpr::from(&expr);
 ///     assert_eq!(" . a (NT#1) b", format!("{}", c_expr));
+///     // CaretExpr's constructed from the same Expr compares equal.
+///     assert_eq!(c_expr, CaretExpr::from(&expr));
 /// });
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 #[derive(Derivative)]
-#[derivative(PartialEq, Eq)]
+#[derivative(PartialEq(bound = ""), Eq(bound = ""))]
+#[derivative(PartialOrd(bound = ""), Ord(bound = ""))]
+#[derivative(Clone(bound = ""), Copy(bound = ""))]
 pub struct CaretExpr<'a, A> {
     caret: usize,
-    #[derivative(PartialEq(compare_with = "std::ptr::eq"))]
+    #[derivative(PartialEq(compare_with = "by_address::eq"))]
+    #[derivative(PartialOrd(compare_with = "by_address::partial_cmp"))]
+    #[derivative(Ord(compare_with = "by_address::cmp"))]
     components: &'a Expr<A>,
 }
 
@@ -128,6 +136,14 @@ impl<'a, A> CaretExpr<'a, A> {
         }))
     }
 
+    /// Extract the next symbol after the caret if it is a non-terminal symbol.
+    pub fn next_non_terminal(self) -> Option<NonTerminalIdx> {
+        match self.step()?.0 {
+            Symbol::Terminal(_) => None,
+            Symbol::NonTerminal(nt) => Some(*nt)
+        }
+    }
+
     /// Consumed part: this is usually not useful, exposed for completeness anyways.
     ///
     /// ```
@@ -161,6 +177,7 @@ impl<'a, A> CaretExpr<'a, A> {
 
 /// Wrapped non-terminal, subscript into [`Grammar`]s.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[must_use = "non-terminals should be added to RHS of other non-terminals or marked as start symbol"]
 pub struct NonTerminalIdx(NonZeroUsize);
 
 impl Display for NonTerminalIdx {
@@ -217,6 +234,7 @@ impl<A> GrammarBuilder<A> {
     }
 
     /// Finish building, and get the final [`Grammar`].
+    #[must_use]
     pub fn finish(self) -> Grammar<A> {
         let mut all_rules = Vec::new();
         let mut indices = Vec::new();
@@ -256,6 +274,17 @@ impl<A> Grammar<A> {
     pub fn rules(&self) -> impl Iterator<Item=(usize, &[Symbol<A>])> + '_ {
         self.non_terminals().enumerate()
             .flat_map(|(n, rs)| rs.iter().map(move |e| (n, &e[..])))
+    }
+
+    /// Iterate over all the production rules in the grammar.
+    pub fn rules_of(&self, nt: NonTerminalIdx) -> &[Expr<A>] {
+        let l = self.indices[nt.get()];
+        let r = if nt.get() + 1 == self.indices.len() {
+            self.all_rules.len()
+        } else {
+            nt.get() + 1
+        };
+        &self.all_rules[l..r]
     }
 
     /// Iterate over all the production rules grouped by non-terminals.
