@@ -20,49 +20,12 @@
 
 use itertools::FoldWhile::{self, Continue, Done};
 
-/// Literals for [`std::num::NonZeroUsize`]. Avoids runtime checks.
-///
-/// ```
-/// # use rowantlr::nonzero;
-/// use std::num::NonZeroUsize;
-/// assert_eq!(nonzero!(1), NonZeroUsize::new(1).unwrap());
-/// ```
-#[macro_export]
-macro_rules! nonzero {
-    ($n: expr) => {{
-        const __NONZERO_N : usize = $n;
-        let _ = [(); (__NONZERO_N.count_ones() as usize) - 1];
-        unsafe { ::std::num::NonZeroUsize::new_unchecked(__NONZERO_N) }
-    }}
-}
-
-/// Literals for [`NonTerminalIdx`](crate::ir::grammar::NonTerminalIdx). Avoids runtime checks.
-///
-/// Always use return value from [`Grammar::add_non_terminal`](crate::ir::grammar::Grammar::add_non_terminal).
-/// This macro is exported for test purpose only.
-///
-/// ```
-/// # use rowantlr::{NonTerminal, nonzero};
-/// use rowantlr::ir::grammar::{NonTerminalIdx, Symbol};
-/// assert_eq!(NonTerminal!(1) as Symbol<()>, Symbol::NonTerminal(NonTerminalIdx(nonzero!(1))));
-/// ```
-#[macro_export]
-#[allow(non_snake_case)]
-macro_rules! NonTerminal {
-    ($n: expr) => {
-        $crate::ir::grammar::Symbol::NonTerminal(
-            $crate::ir::grammar::NonTerminalIdx(
-                $crate::nonzero!($n)
-            )
-        )
-    }
-}
-
 /// Literals for boxed slices. Equivalent to `vec![...].into_boxed_slice()`.
 ///
 /// ```
 /// # use rowantlr::r#box;
 /// assert_eq!(r#box![1, 2, 3], vec![1, 2, 3].into_boxed_slice());
+/// assert_eq!(r#box![1, 2, 3, ], vec![1, 2, 3, ].into_boxed_slice());
 /// assert_eq!(r#box![42; 3], vec![42; 3].into_boxed_slice());
 /// ```
 #[macro_export]

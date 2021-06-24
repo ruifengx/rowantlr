@@ -33,22 +33,23 @@
 //! use rowantlr::ir::grammar::{Grammar, epsilon, Symbol::*};
 //! use rowantlr::backend::ll1::{calc_deduce_to_empty, calc_first};
 //!
-//! let mut g = Grammar::<&'static str>::new();
+//! let mut g = Grammar::<&'static str>::build(|g| {
 //! let [E, T, E_, T_, F] = g.add_non_terminals();
-//! // E  —→ T E'
-//! g.mark_as_start(E);
-//! g.add_rule(E, vec![NonTerminal(T), NonTerminal(E_)]);
-//! // E' —→ + T E' | ε
-//! g.add_rule(E_, vec![Terminal("+"), NonTerminal(T), NonTerminal(E_)]);
-//! g.add_rule(E_, epsilon());
-//! // T  —→ F T'
-//! g.add_rule(T, vec![NonTerminal(F), NonTerminal(T_)]);
-//! // T' —→ * F T' | ε
-//! g.add_rule(T_, vec![Terminal("*"), NonTerminal(F), NonTerminal(T_)]);
-//! g.add_rule(T_, epsilon());
-//! // F  —→ ( E ) | id
-//! g.add_rule(F, vec![Terminal("("), NonTerminal(E), Terminal(")")]);
-//! g.add_rule(F, vec![Terminal("id")]);
+//!     // E  —→ T E'
+//!     g.mark_as_start(E);
+//!     g.add_rule(E, r#box![NonTerminal(T), NonTerminal(E_)]);
+//!     // E' —→ + T E' | ε
+//!     g.add_rule(E_, r#box![Terminal("+"), NonTerminal(T), NonTerminal(E_)]);
+//!     g.add_rule(E_, epsilon());
+//!     // T  —→ F T'
+//!     g.add_rule(T, r#box![NonTerminal(F), NonTerminal(T_)]);
+//!     // T' —→ * F T' | ε
+//!     g.add_rule(T_, r#box![Terminal("*"), NonTerminal(F), NonTerminal(T_)]);
+//!     g.add_rule(T_, epsilon());
+//!     // F  —→ ( E ) | id
+//!     g.add_rule(F, r#box![Terminal("("), NonTerminal(E), Terminal(")")]);
+//!     g.add_rule(F, r#box![Terminal("id")]);
+//! });
 //!
 //! // Calculate `DEDUCE_TO_EMPTY` and `FIRST`.
 //! let deduce_to_empty = calc_deduce_to_empty(&g);
@@ -73,11 +74,11 @@ use crate::utils::continue_if_with;
 
 /// Calculate the `DEDUCE_TO_EMPTY` set for each non-terminal.
 pub fn calc_deduce_to_empty<A>(g: &Grammar<A>) -> Box<[bool]> {
-    let mut res = vec![false; g.rules.len()];
+    let mut res = vec![false; g.non_terminals_count()];
     let mut updated = true;
     while updated {
         updated = false;
-        for (nt, rules) in g.rules.iter().enumerate() {
+        for (nt, rules) in g.non_terminals().enumerate() {
             let new_val = rules.iter().any(|expr| {
                 !expr.iter().fold_while((), |(), x| match x {
                     Symbol::Terminal(_) => Done(()),
@@ -94,12 +95,12 @@ pub fn calc_deduce_to_empty<A>(g: &Grammar<A>) -> Box<[bool]> {
 
 /// Calculate the `FIRST` set for each non-terminal.
 pub fn calc_first<A: Ord + Clone>(g: &Grammar<A>, deduce_to_empty: &[bool]) -> Box<[Box<[A]>]> {
-    let mut res = vec![BTreeSet::new(); g.rules.len()];
+    let mut res = vec![BTreeSet::new(); g.non_terminals_count()];
     let mut updated = true;
     let mut count = 0;
     while updated {
         updated = false;
-        for (nt, expr) in g.rules_iter() {
+        for (nt, expr) in g.rules() {
             res[nt] = expr.iter().fold_while(
                 std::mem::take(&mut res[nt]),
                 |mut cur, x| match x {

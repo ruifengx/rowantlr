@@ -48,10 +48,10 @@ impl<A: Display> Display for Symbol<A> {
 }
 
 /// Expressions are sequences of [`Symbol::Terminal`]s and [`Symbol::NonTerminal`]s.
-pub type Expr<A> = Vec<Symbol<A>>;
+pub type Expr<A> = Box<[Symbol<A>]>;
 
 /// Expression for empty strings (ε).
-pub fn epsilon<A>() -> Expr<A> { Vec::new() }
+pub fn epsilon<A>() -> Expr<A> { Box::new([]) as _ }
 
 /// Expressions with carets.
 ///
@@ -60,11 +60,14 @@ pub fn epsilon<A>() -> Expr<A> { Vec::new() }
 /// - after consuming an `a`: `a . A b`;
 ///
 /// ```
-/// use std::num::NonZeroUsize;
-/// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
-/// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
-/// let c_expr = CaretExpr::from(&expr);
-/// assert_eq!(" . a 1 b", format!("{}", c_expr));
+/// # use rowantlr::r#box;
+/// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+/// let _ = Grammar::<()>::build(|g| {
+///     let nt = g.add_non_terminal();
+///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
+///     let c_expr = CaretExpr::from(&expr);
+///     assert_eq!(" . a (NT#1) b", format!("{}", c_expr));
+/// });
 /// ```
 #[derive(Debug, Clone, Copy)]
 #[derive(Derivative)]
@@ -93,23 +96,29 @@ impl<'a, A> CaretExpr<'a, A> {
     /// Create a new [`CaretExpr`].
     ///
     /// ```
-    /// use std::num::NonZeroUsize;
-    /// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
-    /// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
-    /// let c_expr = CaretExpr::from(&expr);
-    /// assert_eq!(" . a 1 b", format!("{}", c_expr));
+    /// # use rowantlr::r#box;
+    /// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+    /// let _ = Grammar::<()>::build(|g| {
+    ///     let nt = g.add_non_terminal();
+    ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
+    ///     let c_expr = CaretExpr::from(&expr);
+    ///     assert_eq!(" . a (NT#1) b", format!("{}", c_expr));
+    /// });
     /// ```
     pub fn new(expr: &'a Expr<A>) -> Self { CaretExpr::from(expr) }
 
     /// Step the caret, return the [`Symbol`] we just step across and a new [`CaretExpr`].
     ///
     /// ```
-    /// use std::num::NonZeroUsize;
-    /// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
-    /// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
-    /// let c_expr = CaretExpr::from(&expr);
-    /// let (_, c_expr) = c_expr.step().unwrap();
-    /// assert_eq!("a . 1 b", format!("{}", c_expr));
+    /// # use rowantlr::r#box;
+    /// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+    /// let _ = Grammar::<()>::build(|g| {
+    ///     let nt = g.add_non_terminal();
+    ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
+    ///     let c_expr = CaretExpr::from(&expr);
+    ///     let (_, c_expr) = c_expr.step().unwrap();
+    ///     assert_eq!("a . (NT#1) b", format!("{}", c_expr));
+    /// });
     /// ```
     pub fn step(self) -> Option<(&'a Symbol<A>, Self)> {
         if self.caret == self.components.len() { return None; }
@@ -122,57 +131,61 @@ impl<'a, A> CaretExpr<'a, A> {
     /// Consumed part: this is usually not useful, exposed for completeness anyways.
     ///
     /// ```
-    /// use std::num::NonZeroUsize;
-    /// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
-    /// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
-    /// let c_expr = CaretExpr::from(&expr);
-    /// let (_, c_expr) = c_expr.step().unwrap();
-    /// assert_eq!(&[Terminal('a')], c_expr.consumed_part());
+    /// # use rowantlr::r#box;
+    /// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+    /// let _ = Grammar::<()>::build(|g| {
+    ///     let nt = g.add_non_terminal();
+    ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
+    ///     let c_expr = CaretExpr::from(&expr);
+    ///     let (_, c_expr) = c_expr.step().unwrap();
+    ///     assert_eq!(&[Terminal('a')], c_expr.consumed_part());
+    /// });
     /// ```
     pub fn consumed_part(&self) -> &[Symbol<A>] { &self.components[..self.caret] }
 
     /// Symbols yet to consume.
     ///
     /// ```
-    /// use std::num::NonZeroUsize;
-    /// # use rowantlr::{NonTerminal, ir::grammar::{CaretExpr, Symbol::*}};
-    /// let expr = vec![Terminal('a'), NonTerminal!(1), Terminal('b')];
-    /// let c_expr = CaretExpr::from(&expr);
-    /// let (_, c_expr) = c_expr.step().unwrap();
-    /// assert_eq!(&[NonTerminal!(1), Terminal('b')], c_expr.rest_part());
+    /// # use rowantlr::r#box;
+    /// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+    /// let _ = Grammar::<()>::build(|g| {
+    ///     let nt = g.add_non_terminal();
+    ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
+    ///     let c_expr = CaretExpr::from(&expr);
+    ///     let (_, c_expr) = c_expr.step().unwrap();
+    ///     assert_eq!(&[NonTerminal(nt), Terminal('b')], c_expr.rest_part());
+    /// });
     /// ```
     pub fn rest_part(&self) -> &[Symbol<A>] { &self.components[self.caret..] }
 }
 
-/// (Augmented) Grammars, i.e. set of production rules, with a start symbol `S` (indexed 0) not
-/// appearing in RHS of any production rules.
-#[derive(Debug, Eq, PartialEq)]
-pub struct Grammar<A> {
-    pub(crate) rules: Vec<Vec<Expr<A>>>,
-}
-
 /// Wrapped non-terminal, subscript into [`Grammar`]s.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct NonTerminalIdx(pub NonZeroUsize);
+pub struct NonTerminalIdx(NonZeroUsize);
 
 impl Display for NonTerminalIdx {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl<A> Default for Grammar<A> {
-    fn default() -> Self {
-        Grammar { rules: vec![Vec::new()] }
+        write!(f, "(NT#{})", self.0)
     }
 }
 
 impl NonTerminalIdx {
-    /// Get as a [`usize`].
-    pub fn get(self) -> usize { self.0.get() }
+    pub(crate) fn get(self) -> usize { self.0.get() }
 }
 
-impl<A> Grammar<A> {
+/// Builder for [`Grammar`]s.
+#[derive(Debug, Eq, PartialEq)]
+pub struct GrammarBuilder<A> {
+    pub(crate) rules: Vec<Vec<Expr<A>>>,
+}
+
+impl<A> Default for GrammarBuilder<A> {
+    fn default() -> Self {
+        GrammarBuilder { rules: vec![Vec::new()] }
+    }
+}
+
+impl<A> GrammarBuilder<A> {
     /// Create a new grammar, same as `Grammar::default`.
     pub fn new() -> Self { Default::default() }
 
@@ -185,7 +198,7 @@ impl<A> Grammar<A> {
 
     /// Add many new non-terminals all at once.
     pub fn add_non_terminals<const N: usize>(&mut self) -> [NonTerminalIdx; N] {
-        let mut res = [NonTerminalIdx(nonzero!(42)); N];
+        let mut res = [NonTerminalIdx(NonZeroUsize::new(42).unwrap()); N];
         for i in 0..N {
             res[i] = self.add_non_terminal();
         }
@@ -200,12 +213,56 @@ impl<A> Grammar<A> {
     /// Mark a non-terminal symbol as a start symbol.
     pub fn mark_as_start(&mut self, nt: NonTerminalIdx) {
         let nt = Symbol::NonTerminal(nt);
-        self.rules[0].push(vec![nt])
+        self.rules[0].push(Box::new([nt]) as _)
     }
 
+    /// Finish building, and get the final [`Grammar`].
+    pub fn finish(self) -> Grammar<A> {
+        let mut all_rules = Vec::new();
+        let mut indices = Vec::new();
+        for mut rules in self.rules {
+            indices.push(all_rules.len());
+            all_rules.append(&mut rules);
+        }
+        Grammar {
+            all_rules: all_rules.into_boxed_slice(),
+            indices: indices.into_boxed_slice(),
+        }
+    }
+}
+
+/// (Augmented) Grammars, i.e. set of production rules, with a start symbol `S` (indexed 0) not
+/// appearing in RHS of any production rules.
+pub struct Grammar<A> {
+    all_rules: Box<[Expr<A>]>,
+    indices: Box<[usize]>,
+}
+
+impl<A> Grammar<A> {
+    /// Convenient method for building a grammar.
+    pub fn build(proc: impl for<'a> FnOnce(&'a mut GrammarBuilder<A>)) -> Self {
+        let mut builder = GrammarBuilder::new();
+        proc(&mut builder);
+        builder.finish()
+    }
+
+    /// Number of non-terminals in this grammar.
+    pub fn non_terminals_count(&self) -> usize { self.indices.len() }
+
+    /// Number of rules in this grammar.
+    pub fn rules_count(&self) -> usize { self.all_rules.len() }
+
     /// Iterate over all the production rules in the grammar.
-    pub fn rules_iter(&self) -> impl Iterator<Item=(usize, &[Symbol<A>])> {
-        self.rules.iter().enumerate()
-            .flat_map(|(n, e)| e.iter().map(move |x| (n, &x[..])))
+    pub fn rules(&self) -> impl Iterator<Item=(usize, &[Symbol<A>])> + '_ {
+        self.non_terminals().enumerate()
+            .flat_map(|(n, rs)| rs.iter().map(move |e| (n, &e[..])))
+    }
+
+    /// Iterate over all the production rules grouped by non-terminals.
+    pub fn non_terminals(&self) -> impl Iterator<Item=&[Expr<A>]> + '_ {
+        self.indices.iter().copied()
+            .zip(self.indices.iter().copied().dropping(1)
+                .chain(std::iter::once(self.all_rules.len())))
+            .map(move |(l, r)| &self.all_rules[l..r])
     }
 }
