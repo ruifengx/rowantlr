@@ -22,11 +22,10 @@ use std::fmt::{self, Display, Formatter};
 use std::num::NonZeroUsize;
 use derivative::Derivative;
 use itertools::Itertools;
-
 use crate::utils::by_address;
 
 /// Terminal and non-terminal symbols.
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
 pub enum Symbol<A> {
     /// Terminals are closed terms.
     Terminal(A),
@@ -35,8 +34,7 @@ pub enum Symbol<A> {
     /// Index 0 reserved for the special start symbol `S`, which is not allowed to be referenced
     /// in RHS of any production rules, and thus here ruled out as a non-terminal symbol.
     ///
-    /// Use a [`NonTerminalIdx`] from `Grammar::add_non_terminal` instead of manually constructing
-    /// a [`NonTerminalIdx`]. For test purposes only, use [`NonTerminal`](crate::NonTerminal).
+    /// To get a [`NonTerminalIdx`], use [`GrammarBuilder::add_non_terminal`].
     NonTerminal(NonTerminalIdx),
 }
 
@@ -242,6 +240,7 @@ impl<A> GrammarBuilder<A> {
             indices.push(all_rules.len());
             all_rules.append(&mut rules);
         }
+        indices.push(all_rules.len());
         Grammar {
             all_rules: all_rules.into_boxed_slice(),
             indices: indices.into_boxed_slice(),
@@ -276,6 +275,11 @@ impl<A> Grammar<A> {
             .flat_map(|(n, rs)| rs.iter().map(move |e| (n, &e[..])))
     }
 
+    /// All the generation rules for the start symbol `S` (indexed 0).
+    pub fn start_rules(&self) -> &[Expr<A>] {
+        &self.all_rules[self.indices[0]..self.indices[1]]
+    }
+
     /// Iterate over all the production rules in the grammar.
     pub fn rules_of(&self, nt: NonTerminalIdx) -> &[Expr<A>] {
         let l = self.indices[nt.get()];
@@ -290,8 +294,7 @@ impl<A> Grammar<A> {
     /// Iterate over all the production rules grouped by non-terminals.
     pub fn non_terminals(&self) -> impl Iterator<Item=&[Expr<A>]> + '_ {
         self.indices.iter().copied()
-            .zip(self.indices.iter().copied().dropping(1)
-                .chain(std::iter::once(self.all_rules.len())))
+            .zip(self.indices.iter().copied().dropping(1))
             .map(move |(l, r)| &self.all_rules[l..r])
     }
 }

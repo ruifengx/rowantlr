@@ -25,6 +25,3 @@ pub mod utils;
 
 pub mod ir;
 pub mod backend;
-
-#[cfg(test)]
-mod tests {}

@@ -34,7 +34,7 @@
 //! use rowantlr::backend::ll1::{calc_deduce_to_empty, calc_first};
 //!
 //! let mut g = Grammar::<&'static str>::build(|g| {
-//! let [E, T, E_, T_, F] = g.add_non_terminals();
+//!     let [E, T, E_, T_, F] = g.add_non_terminals();
 //!     // E  —→ T E'
 //!     g.mark_as_start(E);
 //!     g.add_rule(E, r#box![NonTerminal(T), NonTerminal(E_)]);
@@ -72,7 +72,23 @@ use itertools::FoldWhile::*;
 use crate::ir::grammar::{Grammar, Symbol};
 use crate::utils::continue_if_with;
 
+/// A lookahead token.
+pub struct Lookahead<A>(Option<A>);
+
+impl<A> Lookahead<A> {
+    /// This token indicated the end of the input.
+    pub const END_OF_INPUT: Self = Lookahead(None);
+    /// A normal token where the input stream continues.
+    pub fn new(a: A) -> Self { Lookahead(Some(a)) }
+    /// Converts from `&Lookahead<A>` to `Lookahead<&A>`.
+    pub fn as_ref(&self) -> Lookahead<&A> { Lookahead(self.0.as_ref()) }
+    /// Converts from `&mut Lookahead<A>` to `Lookahead<&mut A>`.
+    pub fn as_mut(&mut self) -> Lookahead<&mut A> { Lookahead(self.0.as_mut()) }
+}
+
 /// Calculate the `DEDUCE_TO_EMPTY` set for each non-terminal.
+///
+/// For examples, refer to [module-level documentation](../index.html).
 pub fn calc_deduce_to_empty<A>(g: &Grammar<A>) -> Box<[bool]> {
     let mut res = vec![false; g.non_terminals_count()];
     let mut updated = true;
@@ -94,6 +110,8 @@ pub fn calc_deduce_to_empty<A>(g: &Grammar<A>) -> Box<[bool]> {
 }
 
 /// Calculate the `FIRST` set for each non-terminal.
+///
+/// For examples, refer to [module-level documentation](../index.html).
 pub fn calc_first<A: Ord + Clone>(g: &Grammar<A>, deduce_to_empty: &[bool]) -> Box<[Box<[A]>]> {
     let mut res = vec![BTreeSet::new(); g.non_terminals_count()];
     let mut updated = true;
