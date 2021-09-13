@@ -49,31 +49,62 @@
 
 use std::rc::Rc;
 use std::fmt::Debug;
-use std::collections::{BTreeSet, VecDeque, BTreeMap};
-use crate::ir::grammar::{Grammar, CaretExpr, Symbol};
 use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use derivative::Derivative;
+use crate::ir::grammar::{CaretExpr, Grammar, Symbol};
+
+/// So-said "simple" types, with the tag types muted.
+pub mod simple {
+    /// Simple LALR entries, with no tag data.
+    pub type Entry<'a, A> = super::Entry<'a, A, ()>;
+    /// An LALR state set with no additional information attached to generation rules.
+    pub type State<'a, A> = super::State<'a, A, ()>;
+    /// An LALR kernel state set with no additional information attached to generation rules.
+    pub type Kernel<'a, A> = super::Kernel<'a, A, ()>;
+    /// [`FrozenKernel`] with no tag data.
+    pub type FrozenKernel<'a, A> = super::FrozenKernel<'a, A, ()>;
+}
+
+/// Non-terminal symbols, represented as their index in the [`Grammar`], including the internal
+/// start symbol `S` (indexed 0).
+pub type NonTerminal = usize;
+
+/// An LALR entry in a state set.
+#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(PartialEq(bound = "Tag: PartialEq"), Eq(bound = "Tag: Eq"))]
+#[derivative(PartialOrd(bound = "Tag: PartialOrd"), Ord(bound = "Tag: Ord"))]
+#[derivative(Clone(bound = "Tag: Clone"), Copy(bound = "Tag: Copy"))]
+pub struct Entry<'a, A, Tag> {
+    /// The non-terminal symbol of this entry.
+    pub symbol: NonTerminal,
+    /// The RHS of the generation rule, with a caret in it for the current status.
+    pub rhs: CaretExpr<'a, A>,
+    /// The tag data for this entry, typically lookahead tokens or simply nothing.
+    pub tag: Tag,
+}
 
 /// An LALR state set.
-pub type State<'a, A> = BTreeSet<CaretExpr<'a, A>>;
-
+pub type State<'a, A, Tag> = BTreeSet<Entry<'a, A, Tag>>;
 /// An LALR kernel state set (all `A -> . β` rules omitted).
 /// This property is not enforced, this type is only for better readability.
-pub type Kernel<'a, A> = State<'a, A>;
+pub type Kernel<'a, A, Tag> = State<'a, A, Tag>;
 
 /// The `CLOSURE` of an item set.
 pub fn closure<'a, A>(
     g: &'a Grammar<A>,
-    s: impl Iterator<Item=&'a CaretExpr<'a, A>>,
-) -> State<A> {
+    s: impl Iterator<Item=&'a simple::Entry<'a, A>>,
+) -> simple::State<A> {
     let mut res = s.copied().collect::<BTreeSet<_>>();
     let mut already_inserted = BTreeSet::new();
     let mut queue = VecDeque::new();
-    queue.extend(res.iter().copied().filter_map(CaretExpr::next_non_terminal));
+    queue.extend(res.iter().copied().filter_map(|e| e.rhs.next_non_terminal()));
     while let Some(x) = queue.pop_front() {
         already_inserted.insert(x);
         queue.extend(g.rules_of(x).iter()
             .map(CaretExpr::new)
-            .filter(|rhs| res.insert(*rhs))
+            .filter(|&rhs| res.insert(Entry { symbol: x.get(), rhs: rhs, tag: () }))
             .filter_map(CaretExpr::next_non_terminal)
             .filter(|nt| !already_inserted.contains(nt)));
     }
@@ -81,46 +112,49 @@ pub fn closure<'a, A>(
 }
 
 /// Calculate all non-empty `GOTO(I, X)` for each `X ∈ V`.
-pub fn all_goto_sets<'a, A: Ord + Clone>(i: &State<'a, A>) -> BTreeMap<Symbol<A>, State<'a, A>> {
-    let mut res = BTreeMap::<Symbol<A>, State<A>>::new();
-    for (x, rhs) in i.iter().copied().filter_map(CaretExpr::step) {
-        res.entry(x.clone()).or_default().insert(rhs);
+pub fn all_goto_sets<'a, A, Tag>(i: &State<'a, A, Tag>) -> BTreeMap<Symbol<A>, State<'a, A, Tag>>
+    where A: Ord + Clone, Tag: Ord + Clone {
+    let mut res = BTreeMap::<Symbol<A>, State<A, Tag>>::new();
+    for entry in i.iter().cloned() {
+        if let Some((x, rhs)) = entry.rhs.step() {
+            res.entry(x.clone()).or_default().insert(Entry { rhs, ..entry });
+        }
     }
     res
 }
 
 /// Kernel sets frozen for efficient access.
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
-pub struct FrozenKernel<'a, A>(Box<[CaretExpr<'a, A>]>);
+pub struct FrozenKernel<'a, A, Tag>(Box<[Entry<'a, A, Tag>]>);
 
-impl<'a, A> FrozenKernel<'a, A> {
+impl<'a, A, Tag: Ord> FrozenKernel<'a, A, Tag> {
     /// Freeze a [`Kernel`] for future use.
-    pub fn freeze(i: Kernel<'a, A>) -> Self {
+    pub fn freeze(i: Kernel<'a, A, Tag>) -> Self {
         FrozenKernel(i.into_iter().collect())
     }
 
     /// Compare with a [`Kernel`].
-    pub fn compare(&self, i: &Kernel<'a, A>) -> Ordering {
+    pub fn compare(&self, i: &Kernel<'a, A, Tag>) -> Ordering {
         self.0.iter().cmp(i.iter())
     }
 
     /// Get all the rules in this kernel set.
-    pub fn rules(&self) -> impl Iterator<Item=&CaretExpr<'a, A>> {
+    pub fn rules(&self) -> impl Iterator<Item=&Entry<'a, A, Tag>> {
         self.0.iter()
     }
 }
 
 /// All kernel sets for a [`Grammar`], together with the full `GOTO` table.
-pub struct KernelSets<'a, A> {
-    kernels: Box<[FrozenKernel<'a, A>]>,
+pub struct KernelSets<'a, A, Tag> {
+    kernels: Box<[FrozenKernel<'a, A, Tag>]>,
     goto_table: Box<[(usize, Symbol<A>, usize)]>,
 }
 
-impl<'a, A> KernelSets<'a, A> {
+impl<'a, A, Tag> KernelSets<'a, A, Tag> {
     /// Get the (ascending) list of frozen kernel sets.
-    pub fn kernels(&self) -> &[FrozenKernel<'a, A>] { &self.kernels }
+    pub fn kernels(&self) -> &[FrozenKernel<'a, A, Tag>] { &self.kernels }
     /// Get index of a (non-frozen) kernel sets.
-    pub fn index_of(&self, i: &Kernel<A>) -> Option<usize> {
+    pub fn index_of(&self, i: &Kernel<A, Tag>) -> Option<usize> where Tag: Ord {
         self.kernels.binary_search_by(|k| k.compare(i)).ok()
     }
     /// Calculate the `GOTO(from, sym)` set.
@@ -130,8 +164,11 @@ impl<'a, A> KernelSets<'a, A> {
 }
 
 /// Calculate all kernel sets of a given [`Grammar`].
-pub fn all_kernel_sets<A: Ord + Clone + Debug>(g: &Grammar<A>) -> KernelSets<A> {
-    let start = Rc::new(g.start_rules().iter().map(CaretExpr::new).collect::<Kernel<A>>());
+pub fn all_kernel_sets<A: Ord + Clone + Debug>(g: &Grammar<A>) -> KernelSets<A, ()> {
+    let start = Rc::new(g.start_rules().iter()
+        .map(CaretExpr::new)
+        .map(|rhs| Entry { symbol: 0, rhs, tag: () })
+        .collect::<simple::Kernel<A>>());
     let mut kernels_map = BTreeMap::new();
     kernels_map.insert(start.clone(), 0usize);
     let mut queue = VecDeque::new();
