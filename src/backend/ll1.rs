@@ -109,34 +109,53 @@ pub fn calc_deduce_to_empty<A>(g: &Grammar<A>) -> Box<[bool]> {
     res.into_boxed_slice()
 }
 
+/// Calculate `FIRST(β)` for any string `β ∈ V*`, according to the provided `FIRST` and
+/// `DEDUCE_TO_EMPTY` sets.
+pub fn first_of<'a, A, C>(expr: impl IntoIterator<Item=&'a Symbol<A>>,
+                          first: &'a [C], deduce_to_empty: &[bool]) -> BTreeSet<A>
+    where A: Ord + Clone + 'a, &'a C: IntoIterator<Item=&'a A> {
+    let mut result = BTreeSet::new();
+    append_first_of(expr, first, deduce_to_empty, &mut result);
+    result
+}
+
+/// Append `FIRST(β)` to a given [`BTreeSet`] for any string `β ∈ V*`, according to the provided
+/// `FIRST` and `DEDUCE_TO_EMPTY` sets.
+pub fn append_first_of<'a, A, C>(expr: impl IntoIterator<Item=&'a Symbol<A>>,
+                                 first: &'a [C], deduce_to_empty: &[bool],
+                                 result: &mut BTreeSet<A>) -> bool
+    where A: Ord + Clone + 'a, &'a C: IntoIterator<Item=&'a A> {
+    let mut updated = false;
+    for x in expr {
+        match x {
+            Symbol::Terminal(t) => {
+                updated |= result.insert(t.clone());
+                break;
+            }
+            Symbol::NonTerminal(nt) => {
+                let nt = nt.get();
+                for a in &first[nt] {
+                    updated |= result.insert(a.clone());
+                }
+                if !deduce_to_empty[nt] { break; }
+            }
+        }
+    }
+    updated
+}
+
 /// Calculate the `FIRST` set for each non-terminal.
 ///
 /// For examples, refer to [module-level documentation](../index.html).
 pub fn calc_first<A: Ord + Clone>(g: &Grammar<A>, deduce_to_empty: &[bool]) -> Box<[Box<[A]>]> {
     let mut res = vec![BTreeSet::new(); g.non_terminals_count()];
     let mut updated = true;
-    let mut count = 0;
     while updated {
-        updated = false;
         for (nt, expr) in g.rules() {
-            res[nt] = expr.iter().fold_while(
-                std::mem::take(&mut res[nt]),
-                |mut cur, x| match x {
-                    Symbol::Terminal(t) => {
-                        updated |= cur.insert(t.clone());
-                        Done(cur)
-                    }
-                    Symbol::NonTerminal(nt) => {
-                        let nt = nt.get();
-                        for a in &res[nt] {
-                            updated |= cur.insert(a.clone());
-                        }
-                        continue_if_with(deduce_to_empty[nt], cur)
-                    }
-                }).into_inner();
+            let mut cur = std::mem::take(&mut res[nt]);
+            updated = append_first_of(expr, &res, deduce_to_empty, &mut cur);
+            res[nt] = cur;
         }
-        count += 1;
-        if count > 10 { panic!() }
     }
     res.into_iter().map(|s| s.into_iter().collect()).collect()
 }
