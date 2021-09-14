@@ -181,12 +181,16 @@ pub fn closure<'a, A, M: TagManager<A>>(
     res
 }
 
-type EntryIter<'a, A, Tag> = std::vec::IntoIter<(&'a Symbol<A>, Entry<'a, A, Tag>)>;
+type EntryIter<'a, A, Tag> = itertools::Dedup<std::vec::IntoIter<(&'a Symbol<A>, Entry<'a, A, Tag>)>>;
 type SndFn<'a, A, Tag> = fn(&(&'a Symbol<A>, Entry<'a, A, Tag>)) -> &'a Symbol<A>;
 
 /// Iterables for traversing `GOTO` sets, always call [`RawGotoSets::get`] on this type.
 #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
-pub struct RawGotoSets<'a, A, Tag>(GroupBy<&'a Symbol<A>, EntryIter<'a, A, Tag>, SndFn<'a, A, Tag>>);
+pub struct RawGotoSets<'a, A: PartialEq, Tag>(GroupBy<
+    &'a Symbol<A>,
+    EntryIter<'a, A, Tag>,
+    SndFn<'a, A, Tag>
+>);
 
 impl<'a, A: 'a + PartialEq, Tag> RawGotoSets<'a, A, Tag> {
     /// Get the iterable for the `GOTO` sets.
@@ -204,7 +208,7 @@ pub fn all_goto_sets<'s, 'a, A: 'a + PartialEq + Ord + Clone, Tag: 'a + Clone>(
         Some((x, entry))
     }).collect_vec();
     res.sort_unstable();
-    RawGotoSets(res.into_iter().group_by(|p| p.0))
+    RawGotoSets(res.into_iter().dedup().group_by(|p| p.0))
 }
 
 /// Kernel sets frozen for efficient access.
