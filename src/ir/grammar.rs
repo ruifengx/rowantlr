@@ -136,9 +136,14 @@ impl<'a, A> CaretExpr<'a, A> {
 
     /// Extract the next symbol after the caret if it is a non-terminal symbol.
     pub fn next_non_terminal(self) -> Option<NonTerminalIdx> {
-        match self.step()?.0 {
-            Symbol::Terminal(_) => None,
-            Symbol::NonTerminal(nt) => Some(*nt)
+        Some(self.step_non_terminal()?.0)
+    }
+
+    /// Step the caret if the next symbol after the caret is a non-terminal symbol.
+    pub fn step_non_terminal(self) -> Option<(NonTerminalIdx, Self)> {
+        match self.step()? {
+            (Symbol::NonTerminal(nt), rest) => Some((*nt, rest)),
+            (Symbol::Terminal(_), _) => None,
         }
     }
 
@@ -214,8 +219,8 @@ impl<A> GrammarBuilder<A> {
     /// Add many new non-terminals all at once.
     pub fn add_non_terminals<const N: usize>(&mut self) -> [NonTerminalIdx; N] {
         let mut res = [NonTerminalIdx(NonZeroUsize::new(42).unwrap()); N];
-        for i in 0..N {
-            res[i] = self.add_non_terminal();
+        for nt in &mut res {
+            *nt = self.add_non_terminal();
         }
         res
     }
