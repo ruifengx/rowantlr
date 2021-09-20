@@ -70,7 +70,7 @@ pub struct Dot2TeX<'a, A: ?Sized, Env: ?Sized>(&'a A, &'a Env);
 
 impl<'a, A: DisplayDot2TeX<Env> + ?Sized, Env: ?Sized> Display for Dot2TeX<'a, A, Env> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt_dot2tex(&self.1, f)
+        self.0.fmt_dot2tex(self.1, f)
     }
 }
 

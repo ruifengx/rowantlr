@@ -197,9 +197,8 @@ pub trait TagManager<A> {
 /// The `CLOSURE` of an item set.
 pub fn closure<'a, A, M: TagManager<A>>(
     g: &'a Grammar<A>, s: Kernel<'a, A, M::Tag>, mgr: &mut M,
-) -> State<'a, A, M::Tag> where M::Tag: Clone + 'a, A: Display, M::Tag: Display {
+) -> State<'a, A, M::Tag> where M::Tag: Clone + 'a {
     let mut res = s;
-    println!("CLOSURE of:\n{}", res.iter().map(|entry| format!("{}", entry)).format("\n"));
     let mut queue = VecDeque::new();
     queue.extend(res.iter().map(|entry| entry.rule)
         .filter(|rule| rule.rhs.step_non_terminal().is_some()));
@@ -220,7 +219,6 @@ pub fn closure<'a, A, M: TagManager<A>>(
             }
         }
     }
-    println!("== BEGIN RESULT\n{}\n== END RESULT", res.iter().map(|entry| format!("{}", entry)).format("\n"));
     res
 }
 
@@ -369,7 +367,7 @@ impl<'a, A, Tag, T> DisplayDot2TeX<[T]> for KernelSets<'a, A, Tag>
 
 /// Calculate all kernel sets of a given [`Grammar`].
 pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'a, A, M::Tag>
-    where A: Ord + Clone + Debug + Display, M: TagManager<A>, M::Tag: 'a + Debug + Clone + Display {
+    where A: Ord + Clone, M: TagManager<A>, M::Tag: Clone + 'a {
     let root_tag = mgr.root_tag();
     let start = g.start_rules().iter()
         .map(CaretExpr::new)
@@ -409,7 +407,7 @@ pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'
     let mut idx_map = vec![0usize; kernels_map.len()];
     for (new_idx, (kernel, old_idx)) in kernels_map.into_iter().enumerate() {
         idx_map[old_idx] = new_idx;
-        kernels.push(FrozenKernel::freeze(Rc::try_unwrap(kernel).unwrap()));
+        kernels.push(FrozenKernel::freeze(Rc::try_unwrap(kernel).ok().unwrap()));
     }
     let goto_table = goto_table.into_iter()
         .map(|((from, sym), to)| (idx_map[from], sym, idx_map[to]))
@@ -551,14 +549,13 @@ impl<'a, A> LookaheadManager<'a, A> {
     }
 }
 
-impl<'a, A: Ord + Clone + Display> TagManager<A> for LookaheadManager<'a, A> {
+impl<'a, A: Ord + Clone> TagManager<A> for LookaheadManager<'a, A> {
     type Tag = usize;
 
     fn generate_tag(&mut self, upcoming: &[Symbol<A>], parent_tag: &Self::Tag) -> Self::Tag {
         let this = self.tags.len();
         self.tags.push(LookaheadsWithDep::default());
         self.update_tag(upcoming, parent_tag, &this);
-        println!("tag {} generated for upcoming={{{}}} and parent_tag={}", this, upcoming.iter().format(", "), parent_tag);
         this
     }
 
@@ -630,7 +627,7 @@ impl<A: DisplayDot2TeX<Env>, Env: ?Sized> DisplayDot2TeX<Env> for Lookaheads<A> 
     }
 }
 
-impl<A: Ord + Clone + Display> TagResolver<A> for LookaheadResolver<A> {
+impl<A: Ord + Clone> TagResolver<A> for LookaheadResolver<A> {
     type Resolved = Lookaheads<A>;
 
     fn tag_count(&self) -> usize { self.tags.len() }
@@ -661,7 +658,7 @@ impl<A: Ord + Clone + Display> TagResolver<A> for LookaheadResolver<A> {
 /// Build LALR kernel sets table, and the `GOTO` table.
 pub fn build<'a, A>(grammar: &'a Grammar<A>, first: &[Box<[A]>], deduce_to_empty: &[bool])
                     -> KernelSets<'a, A, Lookaheads<A>>
-    where A: Debug + Ord + Clone + 'a + Display {
+    where A: Debug + Ord + Clone + 'a {
     let mut tag_manager = LookaheadManager::new(first, deduce_to_empty);
     let sets = all_kernel_sets(grammar, &mut tag_manager);
     let mut resolver = tag_manager.into_resolver();
