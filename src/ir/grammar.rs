@@ -22,7 +22,7 @@ use std::fmt::{self, Display, Formatter};
 use std::num::NonZeroUsize;
 use derivative::Derivative;
 use itertools::Itertools;
-use crate::utils::by_address;
+use crate::utils::{by_address, DisplayDot2TeX, simple::DisplayDot2TeX as DisplayDot2TeX_};
 
 /// Terminal and non-terminal symbols.
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone, Copy)]
@@ -44,6 +44,40 @@ impl<A: Display> Display for Symbol<A> {
             Symbol::Terminal(a) => write!(f, "{}", a),
             Symbol::NonTerminal(n) => write!(f, "{}", *n),
         }
+    }
+}
+
+impl<A: DisplayDot2TeX> DisplayDot2TeX for Symbol<A> {
+    fn fmt_dot2tex(&self, _: &(), f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Symbol::Terminal(t) => write!(f, r"\token{{{}}}", t.display_dot2tex_()),
+            Symbol::NonTerminal(nt) => write!(f, r"\NT{{{}}}", nt.get()),
+        }
+    }
+}
+
+impl<A: DisplayDot2TeX<[T]>, T: AsRef<str>> DisplayDot2TeX<[T]> for Symbol<A> {
+    fn fmt_dot2tex(&self, dict: &[T], f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Symbol::Terminal(t) => write!(f, r"\token{{{}}}", t.display_dot2tex(dict)),
+            Symbol::NonTerminal(nt) =>
+                write!(f, r"\NT{{{}}}", dict[nt.get()].as_ref().display_dot2tex_()),
+        }
+    }
+}
+
+impl<A, Env: ?Sized> DisplayDot2TeX<Env> for [Symbol<A>]
+    where Symbol<A>: DisplayDot2TeX<Env> {
+    fn fmt_dot2tex(&self, env: &Env, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut expr = self.iter();
+        if let Some(head) = expr.next() {
+            head.fmt_dot2tex(env, f)?;
+            for item in expr {
+                f.write_str(r"\,")?;
+                item.fmt_dot2tex(env, f)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -95,6 +129,15 @@ impl<'a, A: Display> Display for CaretExpr<'a, A> {
         write!(f, "{} . {}",
                self.components[..self.caret].iter().format(" "),
                self.components[self.caret..].iter().format(" "))
+    }
+}
+
+impl<'a, A, Env: ?Sized> DisplayDot2TeX<Env> for CaretExpr<'a, A>
+    where Symbol<A>: DisplayDot2TeX<Env> {
+    fn fmt_dot2tex(&self, env: &Env, f: &mut Formatter<'_>) -> fmt::Result {
+        self.consumed_part().fmt_dot2tex(env, f)?;
+        f.write_str(r#" \caret "#)?;
+        self.rest_part().fmt_dot2tex(env, f)
     }
 }
 
@@ -269,7 +312,7 @@ impl<A> Grammar<A> {
     }
 
     /// Number of non-terminals in this grammar.
-    pub fn non_terminals_count(&self) -> usize { self.indices.len() }
+    pub fn non_terminals_count(&self) -> usize { self.indices.len() - 1 }
 
     /// Number of rules in this grammar.
     pub fn rules_count(&self) -> usize { self.all_rules.len() }
@@ -288,11 +331,7 @@ impl<A> Grammar<A> {
     /// Iterate over all the production rules in the grammar.
     pub fn rules_of(&self, nt: NonTerminalIdx) -> &[Expr<A>] {
         let l = self.indices[nt.get()];
-        let r = if nt.get() + 1 == self.indices.len() {
-            self.all_rules.len()
-        } else {
-            nt.get() + 1
-        };
+        let r = self.indices[nt.get() + 1];
         &self.all_rules[l..r]
     }
 

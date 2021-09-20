@@ -18,7 +18,7 @@
 
 //! Common utilities.
 
-use itertools::FoldWhile::{self, Continue, Done};
+use std::fmt::{Display, Formatter};
 
 /// Literals for boxed slices. Equivalent to `vec![...].into_boxed_slice()`.
 ///
@@ -65,54 +65,110 @@ pub mod by_address {
     }
 }
 
-/// Continue folding if the condition holds.
-///
-/// ```
-/// # use rowantlr::utils::continue_if;
-/// use itertools::FoldWhile::{Continue, Done};
-/// assert_eq!(continue_if(true), Continue(()));
-/// assert_eq!(continue_if(false), Done(()));
-/// ```
-pub fn continue_if(cond: bool) -> FoldWhile<()> {
-    continue_if_with(cond, ())
-}
+/// Wraps a [`DisplayDot2TeX`] type for convenient formatting.
+pub struct Dot2TeX<'a, A: ?Sized, Env: ?Sized>(&'a A, &'a Env);
 
-/// Continue folding if the condition holds.
-///
-/// ```
-/// # use rowantlr::utils::continue_if_with;
-/// use itertools::FoldWhile::{Continue, Done};
-/// assert_eq!(continue_if_with(true, 42), Continue(42));
-/// assert_eq!(continue_if_with(false, 1), Done(1));
-/// ```
-pub fn continue_if_with<A>(cond: bool, a: A) -> FoldWhile<A> {
-    if cond {
-        Continue(a)
-    } else {
-        Done(a)
+impl<'a, A: DisplayDot2TeX<Env> + ?Sized, Env: ?Sized> Display for Dot2TeX<'a, A, Env> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt_dot2tex(&self.1, f)
     }
 }
 
-/// Continue folding if the condition holds.
+/// Display the automata by going through [`dot2tex`](https://github.com/kjellmf/dot2tex/)
+/// via [`dot2texi`](https://www.ctan.org/pkg/dot2texi) and then `TikZ` in `LaTeX`.
 ///
-/// ```
-/// # use rowantlr::utils::continue_unless;
-/// use itertools::FoldWhile::{Continue, Done};
-/// assert_eq!(continue_unless(true), Done(()));
-/// assert_eq!(continue_unless(false), Continue(()));
-/// ```
-pub fn continue_unless(cond: bool) -> FoldWhile<()> {
-    continue_unless_with(cond, ())
+/// To typeset this automata, make sure `dot2tex` is in `PATH`.
+pub trait DisplayDot2TeX<Env: ?Sized = ()> {
+    /// Formats in `dot2tex` to the given formatter.
+    fn fmt_dot2tex(&self, env: &'_ Env, f: &mut Formatter<'_>) -> std::fmt::Result;
+    /// Wraps the type for convenient formatting.
+    fn display_dot2tex<'a>(&'a self, env: &'a Env) -> Dot2TeX<'a, Self, Env> {
+        Dot2TeX(self, env)
+    }
 }
 
-/// Continue folding if the condition does not hold.
-///
-/// ```
-/// # use rowantlr::utils::continue_unless_with;
-/// use itertools::FoldWhile::{Continue, Done};
-/// assert_eq!(continue_unless_with(true, 42), Done(42));
-/// assert_eq!(continue_unless_with(false, 1), Continue(1));
-/// ```
-pub fn continue_unless_with<A>(cond: bool, a: A) -> FoldWhile<A> {
-    continue_if_with(!cond, a)
+/// Simple versions of the types and traits.
+pub mod simple {
+    use std::fmt::Formatter;
+
+    /// Provide short-cut methods for [`DisplayDot2TeX`] with a nullary environment.
+    pub trait DisplayDot2TeX: super::DisplayDot2TeX + private::Sealed {
+        /// Formats in `dot2tex` to the given formatter.
+        fn fmt_dot2tex_(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            self.fmt_dot2tex(&(), f)
+        }
+        /// Wraps the type for convenient formatting.
+        fn display_dot2tex_(&self) -> super::Dot2TeX<Self, ()> {
+            self.display_dot2tex(&())
+        }
+    }
+
+    impl<T: super::DisplayDot2TeX> DisplayDot2TeX for T {}
+
+    mod private {
+        pub trait Sealed {}
+
+        impl<T> Sealed for T {}
+    }
+}
+
+/// Declares a set of types that are safe to display as `dot2tex` format directly via [`Display`].
+#[macro_export]
+macro_rules! display_dot2tex_via_display {
+    ($($t: ty),+ $(,)?) => {
+        $(
+            impl<Env: ?Sized> DisplayDot2TeX<Env> for $t {
+                fn fmt_dot2tex(&self, _: &Env, f: &mut Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}", self)
+                }
+            }
+        )+
+    }
+}
+
+macro_rules! display_dot2tex_via_deref {
+    ($t: ty $(where $($p: tt)+)?) => {
+        impl<$($($p)+ ,)? Env: ?Sized> DisplayDot2TeX<Env> for $t {
+            fn fmt_dot2tex(&self, env: &Env, f: &mut Formatter<'_>) -> std::fmt::Result {
+                <<Self as ::std::ops::Deref>::Target as DisplayDot2TeX<Env>>::fmt_dot2tex(
+                    ::std::ops::Deref::deref(self), env, f)
+            }
+        }
+    }
+}
+
+display_dot2tex_via_display!(i8, i16, i32, i64, isize, u8, u16, u32, u64, usize);
+display_dot2tex_via_deref!(String);
+display_dot2tex_via_deref!(&'a T where 'a, T: DisplayDot2TeX<Env> + ?Sized);
+display_dot2tex_via_deref!(Box<T> where T: DisplayDot2TeX<Env> + ?Sized);
+display_dot2tex_via_deref!(std::rc::Rc<T> where T: DisplayDot2TeX<Env> + ?Sized);
+display_dot2tex_via_deref!(std::sync::Arc<T> where T: DisplayDot2TeX<Env> + ?Sized);
+display_dot2tex_via_deref!(std::borrow::Cow<'_, B> where B: DisplayDot2TeX<Env> + ToOwned + ?Sized);
+
+const TEX_SPECIAL: &[char] = &['#', '$', '%', '&', '\\', '^', '_', '{', '}', '~'];
+
+impl<Env: ?Sized> DisplayDot2TeX<Env> for str {
+    fn fmt_dot2tex(&self, _: &Env, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut rest = self;
+        while let Some(idx) = rest.find(TEX_SPECIAL) {
+            if idx != 0 { f.write_str(&rest[..idx])?; }
+            let mut rest_chars = rest[idx..].chars();
+            f.write_str(match rest_chars.next().unwrap() {
+                '#' => r"\#",
+                '$' => r"\$",
+                '%' => r"\%",
+                '&' => r"\&",
+                '\\' => r"\backslash ",
+                '^' => r"\char94 ",
+                '_' => r"\_",
+                '{' => r"\{",
+                '}' => r"\}",
+                '~' => r"\textasciitilde ",
+                _ => unreachable!(),
+            })?;
+            rest = rest_chars.as_str();
+        }
+        if !rest.is_empty() { f.write_str(rest)?; }
+        Ok(())
+    }
 }

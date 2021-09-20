@@ -14,3 +14,4 @@ description = "An ANTLR like parser generator framework targetting rowan."
 [dependencies]
 itertools = "0.10"
 derivative = "2.2"
+indoc = "1.0"

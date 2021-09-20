@@ -65,14 +65,14 @@
 //! ]);
 //! ```
 
+use std::borrow::Borrow;
 use std::collections::BTreeSet;
-use itertools::Itertools;
-use itertools::FoldWhile::*;
-
+use std::fmt::{Display, Formatter};
 use crate::ir::grammar::{Grammar, Symbol};
-use crate::utils::continue_if_with;
+use crate::utils::DisplayDot2TeX;
 
 /// A lookahead token.
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Lookahead<A>(Option<A>);
 
 impl<A> Lookahead<A> {
@@ -86,6 +86,28 @@ impl<A> Lookahead<A> {
     pub fn as_mut(&mut self) -> Lookahead<&mut A> { Lookahead(self.0.as_mut()) }
 }
 
+impl<A> From<A> for Lookahead<A> {
+    fn from(a: A) -> Self { Lookahead::new(a) }
+}
+
+impl<A: Display> Display for Lookahead<A> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            None => write!(f, "<<EOF>>"),
+            Some(a) => write!(f, "{}", a),
+        }
+    }
+}
+
+impl<A: DisplayDot2TeX<Env>, Env: ?Sized> DisplayDot2TeX<Env> for Lookahead<A> {
+    fn fmt_dot2tex(&self, env: &Env, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            None => write!(f, r"\EOF "),
+            Some(a) => write!(f, r"\token{{{}}}", a.display_dot2tex(env)),
+        }
+    }
+}
+
 /// Calculate the `DEDUCE_TO_EMPTY` set for each non-terminal.
 ///
 /// For examples, refer to [module-level documentation](../index.html).
@@ -95,13 +117,8 @@ pub fn calc_deduce_to_empty<A>(g: &Grammar<A>) -> Box<[bool]> {
     while updated {
         updated = false;
         for (nt, rules) in g.non_terminals().enumerate() {
-            let new_val = rules.iter().any(|expr| {
-                !expr.iter().fold_while((), |(), x| match x {
-                    Symbol::Terminal(_) => Done(()),
-                    Symbol::NonTerminal(nt) =>
-                        continue_if_with(res[nt.get()], ()),
-                }).is_done()
-            });
+            let new_val = rules.iter().any(|expr| expr.iter()
+                .all(|x| matches!(x, Symbol::NonTerminal(nt) if res[nt.get()])));
             updated |= res[nt] != new_val;
             res[nt] = new_val;
         }
@@ -110,38 +127,40 @@ pub fn calc_deduce_to_empty<A>(g: &Grammar<A>) -> Box<[bool]> {
 }
 
 /// Calculate `FIRST(β)` for any string `β ∈ V*`, according to the provided `FIRST` and
-/// `DEDUCE_TO_EMPTY` sets.
-pub fn first_of<'a, A, C>(expr: impl IntoIterator<Item=&'a Symbol<A>>,
-                          first: &'a [C], deduce_to_empty: &[bool]) -> BTreeSet<A>
-    where A: Ord + Clone + 'a, &'a C: IntoIterator<Item=&'a A> {
+/// `DEDUCE_TO_EMPTY` sets. The `bool` indicates whether or not this string may deduce to empty.
+pub fn first_of<'a, A>(expr: impl IntoIterator<Item=&'a Symbol<A>>,
+                       first: &'a [Box<[A]>], deduce_to_empty: &[bool]) -> (BTreeSet<A>, bool)
+    where A: Clone + Ord + 'a {
     let mut result = BTreeSet::new();
-    append_first_of(expr, first, deduce_to_empty, &mut result);
-    result
+    let nullable = append_first_of::<_, _, _, _, [A]>(
+        expr, first, deduce_to_empty, &mut result, &mut false);
+    (result, nullable)
 }
 
 /// Append `FIRST(β)` to a given [`BTreeSet`] for any string `β ∈ V*`, according to the provided
-/// `FIRST` and `DEDUCE_TO_EMPTY` sets.
-pub fn append_first_of<'a, A, C>(expr: impl IntoIterator<Item=&'a Symbol<A>>,
-                                 first: &'a [C], deduce_to_empty: &[bool],
-                                 result: &mut BTreeSet<A>) -> bool
-    where A: Ord + Clone + 'a, &'a C: IntoIterator<Item=&'a A> {
-    let mut updated = false;
+/// `FIRST` and `DEDUCE_TO_EMPTY` sets. The returned `bool` indicates whether or not this input
+/// string may deduce to empty.
+pub fn append_first_of<'a, A, R, E, C, I>(expr: E, first: &'a [C], deduce_to_empty: &[bool],
+                                          result: &mut BTreeSet<R>, updated: &mut bool) -> bool
+    where A: Clone + Into<R> + 'a, R: Ord, I: 'a + ?Sized,
+          E: IntoIterator<Item=&'a Symbol<A>>,
+          C: Borrow<I>, &'a I: IntoIterator<Item=&'a A> {
     for x in expr {
         match x {
             Symbol::Terminal(t) => {
-                updated |= result.insert(t.clone());
-                break;
+                *updated |= result.insert(t.clone().into());
+                return false;
             }
             Symbol::NonTerminal(nt) => {
                 let nt = nt.get();
-                for a in &first[nt] {
-                    updated |= result.insert(a.clone());
+                for a in first[nt].borrow() {
+                    *updated |= result.insert(a.clone().into());
                 }
-                if !deduce_to_empty[nt] { break; }
+                if !deduce_to_empty[nt] { return false; }
             }
         }
     }
-    updated
+    true
 }
 
 /// Calculate the `FIRST` set for each non-terminal.
@@ -151,9 +170,10 @@ pub fn calc_first<A: Ord + Clone>(g: &Grammar<A>, deduce_to_empty: &[bool]) -> B
     let mut res = vec![BTreeSet::new(); g.non_terminals_count()];
     let mut updated = true;
     while updated {
+        updated = false;
         for (nt, expr) in g.rules() {
             let mut cur = std::mem::take(&mut res[nt]);
-            updated = append_first_of(expr, &res, deduce_to_empty, &mut cur);
+            append_first_of(expr, &res, deduce_to_empty, &mut cur, &mut updated);
             res[nt] = cur;
         }
     }
