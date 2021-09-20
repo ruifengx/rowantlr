@@ -22,9 +22,7 @@
 //! #![allow(non_snake_case)]
 //! use rowantlr::r#box;
 //! use rowantlr::ir::grammar::{Grammar, epsilon, Symbol::*, Expr};
-//! use rowantlr::backend::ll1::{calc_deduce_to_empty, calc_first};
-//! use rowantlr::backend::lalr1;
-//! use rowantlr::utils::DisplayDot2TeX;
+//! use rowantlr::backend::{ll1, lalr1};
 //!
 //! let mut g = Grammar::<&'static str>::build(|g| {
 //!     let [E, T, E_, T_, F] = g.add_non_terminals();
@@ -44,13 +42,99 @@
 //!     g.add_rule(F, r#box![Terminal("id")]);
 //! });
 //!
-//! let deduce_to_empty = calc_deduce_to_empty(&g);
-//! let first = calc_first(&g, &deduce_to_empty);
+//! let deduce_to_empty = ll1::calc_deduce_to_empty(&g);
+//! let first = ll1::calc_first(&g, &deduce_to_empty);
 //! let kernels = lalr1::build(&g, &first, &deduce_to_empty);
+//! assert_eq!(format!("{}", kernels), indoc::indoc! {r"
+//!     State #0:
+//!     (NT#0) ->  . (NT#1) //<<EOF>>
+//!
+//!     State #1:
+//!     (NT#0) -> (NT#1) .  //<<EOF>>
+//!
+//!     State #2:
+//!     (NT#1) -> (NT#2) . (NT#3) //<<EOF>>
+//!
+//!     State #3:
+//!     (NT#1) -> (NT#2) (NT#3) .  //<<EOF>>
+//!
+//!     State #4:
+//!     (NT#2) -> (NT#5) . (NT#4) //<<EOF>>, +
+//!
+//!     State #5:
+//!     (NT#2) -> (NT#5) (NT#4) .  //<<EOF>>, +
+//!
+//!     State #6:
+//!     (NT#3) -> + . (NT#2) (NT#3) //<<EOF>>
+//!
+//!     State #7:
+//!     (NT#3) -> + (NT#2) . (NT#3) //<<EOF>>
+//!
+//!     State #8:
+//!     (NT#3) -> + (NT#2) (NT#3) .  //<<EOF>>
+//!
+//!     State #9:
+//!     (NT#4) -> * . (NT#5) (NT#4) //<<EOF>>, +
+//!
+//!     State #10:
+//!     (NT#4) -> * (NT#5) . (NT#4) //<<EOF>>, +
+//!
+//!     State #11:
+//!     (NT#4) -> * (NT#5) (NT#4) .  //<<EOF>>, +
+//!
+//!     State #12:
+//!     (NT#5) -> ( . (NT#1) ) //<<EOF>>, *, +
+//!
+//!     State #13:
+//!     (NT#5) -> id .  //<<EOF>>, *, +
+//!
+//!     State #14:
+//!     (NT#5) -> ( (NT#1) . ) //<<EOF>>, *, +
+//!
+//!     State #15:
+//!     (NT#5) -> ( (NT#1) ) .  //<<EOF>>, *, +
+//!
+//!     GOTO(0, ()       = 12
+//!     GOTO(0, id)      = 13
+//!     GOTO(0, (NT#1))  = 1
+//!     GOTO(0, (NT#2))  = 2
+//!     GOTO(0, (NT#5))  = 4
+//!     GOTO(12, ()      = 12
+//!     GOTO(12, id)     = 13
+//!     GOTO(12, (NT#1)) = 14
+//!     GOTO(12, (NT#2)) = 2
+//!     GOTO(12, (NT#5)) = 4
+//!     GOTO(2, +)       = 6
+//!     GOTO(2, (NT#3))  = 3
+//!     GOTO(4, *)       = 9
+//!     GOTO(4, (NT#4))  = 5
+//!     GOTO(14, ))      = 15
+//!     GOTO(6, ()       = 12
+//!     GOTO(6, id)      = 13
+//!     GOTO(6, (NT#2))  = 7
+//!     GOTO(6, (NT#5))  = 4
+//!     GOTO(9, ()       = 12
+//!     GOTO(9, id)      = 13
+//!     GOTO(9, (NT#5))  = 10
+//!     GOTO(7, +)       = 6
+//!     GOTO(7, (NT#3))  = 8
+//!     GOTO(10, *)      = 9
+//!     GOTO(10, (NT#4)) = 11
+//!
+//! "});
+//! ```
+//!
+//! To visualise the generated LALR automaton, run the following:
+//!
+//! ```no_run
+//! # use rowantlr::backend::lalr1::{KernelSets, Lookaheads};
+//! # use rowantlr::utils::DisplayDot2TeX;
+//! # let kernels: KernelSets<'static, &'static str, Lookaheads<&'static str>> = unimplemented!();
 //! let dict = &["S", "E", "T", "E'", "T'", "F"];
 //! println!("{}", kernels.display_dot2tex(dict));
-//! panic!()
 //! ```
+//!
+//! and typeset the generated contents using `doc2tex` and LaTeX.
 
 use std::rc::Rc;
 use std::fmt::{Debug, Display, Formatter};
@@ -196,9 +280,9 @@ pub trait TagManager<A> {
 
 /// The `CLOSURE` of an item set.
 pub fn closure<'a, A, M: TagManager<A>>(
-    g: &'a Grammar<A>, s: Kernel<'a, A, M::Tag>, mgr: &mut M,
+    g: &'a Grammar<A>, s: &Kernel<'a, A, M::Tag>, mgr: &mut M,
 ) -> State<'a, A, M::Tag> where M::Tag: Clone + 'a {
-    let mut res = s;
+    let mut res = s.clone();
     let mut queue = VecDeque::new();
     queue.extend(res.iter().map(|entry| entry.rule)
         .filter(|rule| rule.rhs.step_non_terminal().is_some()));
@@ -242,8 +326,8 @@ impl<'a, A: 'a + PartialEq, Tag> RawGotoSets<'a, A, Tag> {
 
 /// Calculate all non-empty `GOTO(I, X)` for each `X ∈ V`.
 pub fn all_goto_sets<'s, 'a, A: 'a + PartialEq + Ord + Clone, Tag: 'a + Clone>(
-    i: &Kernel<'a, A, Tag>) -> RawGotoSets<'a, A, Tag> {
-    let mut res = i.iter().cloned().filter_map(|mut entry| {
+    i: Kernel<'a, A, Tag>) -> RawGotoSets<'a, A, Tag> {
+    let mut res = i.into_iter().filter_map(|mut entry| {
         let (x, rhs) = entry.rule.rhs.step()?;
         entry.rule.rhs = rhs;
         Some((x, entry))
@@ -369,23 +453,21 @@ impl<'a, A, Tag, T> DisplayDot2TeX<[T]> for KernelSets<'a, A, Tag>
 pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'a, A, M::Tag>
     where A: Ord + Clone, M: TagManager<A>, M::Tag: Clone + 'a {
     let root_tag = mgr.root_tag();
-    let start = g.start_rules().iter()
+    let start = Rc::new(g.start_rules().iter()
         .map(CaretExpr::new)
         .map(|rhs| Entry { rule: Rule { symbol: 0, rhs }, tag: root_tag.clone() })
-        .collect();
-    let start = Rc::new(closure(g, start, mgr));
+        .collect::<Kernel<A, M::Tag>>());
     let mut kernels_map = BTreeMap::new();
     kernels_map.insert(start.clone(), 0usize);
     let mut queue = VecDeque::new();
     queue.push_back((0usize, start));
     let mut goto_table = BTreeMap::new();
     while let Some((idx, i)) = queue.pop_front() {
-        for (sym, states) in all_goto_sets(&i).get() {
-            let states = states.map(|entry| Entry {
+        for (sym, states) in all_goto_sets(closure(g, &i, mgr)).get() {
+            let states = Rc::new(states.map(|entry| Entry {
                 tag: mgr.generate_tag(&[], &entry.tag),
                 rule: entry.rule,
-            }).collect();
-            let states = Rc::new(closure(g, states, mgr));
+            }).collect::<Kernel<A, M::Tag>>());
             use std::collections::btree_map::Entry::*;
             let k = kernels_map.len();
             let k = match kernels_map.entry(states.clone()) {
