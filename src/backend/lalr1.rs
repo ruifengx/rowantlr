@@ -18,6 +18,14 @@
 
 //! `LALR(1)` backend for rowantlr and related stuffs.
 //!
+//! Prerequisites (as illustrated in module [`ll1`](super::ll1)):
+//! - use the [`Grammar`] API to create new grammars.
+//! - use [`calc_deduce_to_empty`](super::ll1::calc_deduce_to_empty) to calculate `DEDUCE_TO_EMPTY`.
+//! - use [`calc_first`](super::ll1::calc_first) to calculate `FIRST`.
+//!
+//! Call [`build`] to generate `ACTION` and `GOTO` tables, and use [`Table::simulate_parse`] to
+//! test the grammar on some token streams.
+//!
 //! ```
 //! #![allow(non_snake_case)]
 //! use std::convert::TryFrom;
@@ -194,8 +202,9 @@ pub type Kernel<'a, A, Tag> = State<'a, A, Tag>;
 /// - Keep all the real contents of the tags inside this `TagManager`, and use handles (possibly
 ///   indices) into this manager for tag types. This way when a tag is to be updated, just modify
 ///   the real contents in this manager, and leave the tags (handles) untouched.
-/// - Wrap tag types with [`Cell`]s (when `Tag` is `Copy`) or [`RefCell`]s (when `Tag`s are heavy)
-///   etc. to obtain inherent mutability. This way two `Tag`s can be properly updated.
+/// - Wrap tag types with [`Cell`](std::cell::Cell)s (when `Tag` is `Copy`) or
+///   [`RefCell`](std::cell::RefCell)s (when `Tag`s are heavy) etc. to obtain inherent mutability.
+///   This way two `Tag`s can be properly updated.
 pub trait TagManager<A> {
     /// The tag type the [`Entry`]s is about to use.
     type Tag: 'static;
