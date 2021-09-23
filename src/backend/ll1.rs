@@ -84,6 +84,18 @@ impl<A> Lookahead<A> {
     pub fn as_ref(&self) -> Lookahead<&A> { Lookahead(self.0.as_ref()) }
     /// Converts from `&mut Lookahead<A>` to `Lookahead<&mut A>`.
     pub fn as_mut(&mut self) -> Lookahead<&mut A> { Lookahead(self.0.as_mut()) }
+    /// Expect the lookahead not being `END_OF_INPUT`.
+    pub fn expect(self, msg: &str) -> A { self.0.expect(msg) }
+}
+
+impl<A> Lookahead<&'_ A> {
+    /// Converts from `Lookahead<&A>` back to an owned `Lookahead<A>`.
+    pub fn cloned(self) -> Lookahead<A> where A: Clone { Lookahead(self.0.cloned()) }
+}
+
+impl<A> Lookahead<&'_ mut A> {
+    /// Converts from `Lookahead<&A>` back to an owned `Lookahead<A>`.
+    pub fn cloned(self) -> Lookahead<A> where A: Clone { Lookahead(self.0.cloned()) }
 }
 
 impl<A> From<A> for Lookahead<A> {

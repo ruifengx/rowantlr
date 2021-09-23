@@ -20,108 +20,47 @@
 //!
 //! ```
 //! #![allow(non_snake_case)]
+//! use std::convert::TryFrom;
 //! use rowantlr::r#box;
 //! use rowantlr::ir::grammar::{Grammar, epsilon, Symbol::*, Expr};
-//! use rowantlr::backend::{ll1, lalr1};
+//! use rowantlr::backend::{ll1, ll1::Lookahead, lalr1, lalr1::Action::*};
 //!
 //! let mut g = Grammar::<&'static str>::build(|g| {
-//!     let [E, T, E_, T_, F] = g.add_non_terminals();
-//!     // E  —→ T E'
-//!     g.mark_as_start(E);
-//!     g.add_rule(E, r#box![NonTerminal(T), NonTerminal(E_)]);
-//!     // E' —→ + T E' | ε
-//!     g.add_rule(E_, r#box![Terminal("+"), NonTerminal(T), NonTerminal(E_)]);
-//!     g.add_rule(E_, epsilon());
-//!     // T  —→ F T'
-//!     g.add_rule(T, r#box![NonTerminal(F), NonTerminal(T_)]);
-//!     // T' —→ * F T' | ε
-//!     g.add_rule(T_, r#box![Terminal("*"), NonTerminal(F), NonTerminal(T_)]);
-//!     g.add_rule(T_, epsilon());
-//!     // F  —→ ( E ) | id
-//!     g.add_rule(F, r#box![Terminal("("), NonTerminal(E), Terminal(")")]);
-//!     g.add_rule(F, r#box![Terminal("id")]);
+//!     let [S, L, R] = g.add_non_terminals();
+//!     // S —→ L = R | R
+//!     g.mark_as_start(S);
+//!     g.add_rule(S, r#box![NonTerminal(L), Terminal("="), NonTerminal(R)]);
+//!     g.add_rule(S, r#box![NonTerminal(R)]);
+//!     // L —→ * R | id
+//!     g.add_rule(L, r#box![Terminal("*"), NonTerminal(R)]);
+//!     g.add_rule(L, r#box![Terminal("id")]);
+//!     // R —→ L
+//!     g.add_rule(R, r#box![NonTerminal(L)]);
 //! });
 //!
 //! let deduce_to_empty = ll1::calc_deduce_to_empty(&g);
 //! let first = ll1::calc_first(&g, &deduce_to_empty);
 //! let kernels = lalr1::build(&g, &first, &deduce_to_empty);
-//! assert_eq!(format!("{}", kernels), indoc::indoc! {r"
-//!     State #0:
-//!     (NT#0) ->  . (NT#1) //<<EOF>>
-//!
-//!     State #1:
-//!     (NT#0) -> (NT#1) .  //<<EOF>>
-//!
-//!     State #2:
-//!     (NT#1) -> (NT#2) . (NT#3) //<<EOF>>
-//!
-//!     State #3:
-//!     (NT#1) -> (NT#2) (NT#3) .  //<<EOF>>
-//!
-//!     State #4:
-//!     (NT#2) -> (NT#5) . (NT#4) //<<EOF>>, +
-//!
-//!     State #5:
-//!     (NT#2) -> (NT#5) (NT#4) .  //<<EOF>>, +
-//!
-//!     State #6:
-//!     (NT#3) -> + . (NT#2) (NT#3) //<<EOF>>
-//!
-//!     State #7:
-//!     (NT#3) -> + (NT#2) . (NT#3) //<<EOF>>
-//!
-//!     State #8:
-//!     (NT#3) -> + (NT#2) (NT#3) .  //<<EOF>>
-//!
-//!     State #9:
-//!     (NT#4) -> * . (NT#5) (NT#4) //<<EOF>>, +
-//!
-//!     State #10:
-//!     (NT#4) -> * (NT#5) . (NT#4) //<<EOF>>, +
-//!
-//!     State #11:
-//!     (NT#4) -> * (NT#5) (NT#4) .  //<<EOF>>, +
-//!
-//!     State #12:
-//!     (NT#5) -> ( . (NT#1) ) //<<EOF>>, *, +
-//!
-//!     State #13:
-//!     (NT#5) -> id .  //<<EOF>>, *, +
-//!
-//!     State #14:
-//!     (NT#5) -> ( (NT#1) . ) //<<EOF>>, *, +
-//!
-//!     State #15:
-//!     (NT#5) -> ( (NT#1) ) .  //<<EOF>>, *, +
-//!
-//!     GOTO(0, ()       = 12
-//!     GOTO(0, id)      = 13
-//!     GOTO(0, (NT#1))  = 1
-//!     GOTO(0, (NT#2))  = 2
-//!     GOTO(0, (NT#5))  = 4
-//!     GOTO(12, ()      = 12
-//!     GOTO(12, id)     = 13
-//!     GOTO(12, (NT#1)) = 14
-//!     GOTO(12, (NT#2)) = 2
-//!     GOTO(12, (NT#5)) = 4
-//!     GOTO(2, +)       = 6
-//!     GOTO(2, (NT#3))  = 3
-//!     GOTO(4, *)       = 9
-//!     GOTO(4, (NT#4))  = 5
-//!     GOTO(14, ))      = 15
-//!     GOTO(6, ()       = 12
-//!     GOTO(6, id)      = 13
-//!     GOTO(6, (NT#2))  = 7
-//!     GOTO(6, (NT#5))  = 4
-//!     GOTO(9, ()       = 12
-//!     GOTO(9, id)      = 13
-//!     GOTO(9, (NT#5))  = 10
-//!     GOTO(7, +)       = 6
-//!     GOTO(7, (NT#3))  = 8
-//!     GOTO(10, *)      = 9
-//!     GOTO(10, (NT#4)) = 11
-//!
-//! "});
+//! let table = lalr1::Table::try_from(&kernels).ok().unwrap();
+//! let input = ["*", "*", "id", "=", "id"];
+//! let parse = table.simulate_parse(input.iter()).unwrap();
+//! assert_eq!(
+//!     format!("{}", parse.pretty(&["S'", "S", "L", "R"])),
+//!     indoc::indoc! {r#"
+//!         NT#[ S ]
+//!           NT#[ L ]
+//!             "*"
+//!             NT#[ R ]
+//!               NT#[ L ]
+//!                 "*"
+//!                 NT#[ R ]
+//!                   NT#[ L ]
+//!                     "id"
+//!           "="
+//!           NT#[ R ]
+//!             NT#[ L ]
+//!               "id"
+//!     "#});
 //! ```
 //!
 //! To visualise the generated LALR automaton, run the following:
@@ -130,8 +69,7 @@
 //! # use rowantlr::backend::lalr1::{KernelSets, Lookaheads};
 //! # use rowantlr::utils::DisplayDot2TeX;
 //! # let kernels: KernelSets<'static, &'static str, Lookaheads<&'static str>> = unimplemented!();
-//! let dict = &["S", "E", "T", "E'", "T'", "F"];
-//! println!("{}", kernels.display_dot2tex(dict));
+//! println!("{}", kernels.display_dot2tex(&["S'", "S", "L", "R"]));
 //! ```
 //!
 //! and typeset the generated contents using `doc2tex` and LaTeX.
@@ -146,6 +84,7 @@ use itertools::{Itertools, GroupBy};
 use crate::ir::grammar::{CaretExpr, Grammar, Symbol};
 use crate::backend::ll1::Lookahead;
 use crate::utils::{DisplayDot2TeX, simple::DisplayDot2TeX as DisplayDot2TeX_};
+use std::convert::TryFrom;
 
 /// So-said "simple" types, with the tag types muted.
 pub mod simple {
@@ -280,9 +219,9 @@ pub trait TagManager<A> {
 
 /// The `CLOSURE` of an item set.
 pub fn closure<'a, A, M: TagManager<A>>(
-    g: &'a Grammar<A>, s: &Kernel<'a, A, M::Tag>, mgr: &mut M,
+    g: &'a Grammar<A>, s: Kernel<'a, A, M::Tag>, mgr: &mut M,
 ) -> State<'a, A, M::Tag> where M::Tag: Clone + 'a {
-    let mut res = s.clone();
+    let mut res = s;
     let mut queue = VecDeque::new();
     queue.extend(res.iter().map(|entry| entry.rule)
         .filter(|rule| rule.rhs.step_non_terminal().is_some()));
@@ -326,8 +265,8 @@ impl<'a, A: 'a + PartialEq, Tag> RawGotoSets<'a, A, Tag> {
 
 /// Calculate all non-empty `GOTO(I, X)` for each `X ∈ V`.
 pub fn all_goto_sets<'s, 'a, A: 'a + PartialEq + Ord + Clone, Tag: 'a + Clone>(
-    i: Kernel<'a, A, Tag>) -> RawGotoSets<'a, A, Tag> {
-    let mut res = i.into_iter().filter_map(|mut entry| {
+    i: &Kernel<'a, A, Tag>) -> RawGotoSets<'a, A, Tag> {
+    let mut res = i.iter().cloned().filter_map(|mut entry| {
         let (x, rhs) = entry.rule.rhs.step()?;
         entry.rule.rhs = rhs;
         Some((x, entry))
@@ -453,21 +392,21 @@ impl<'a, A, Tag, T> DisplayDot2TeX<[T]> for KernelSets<'a, A, Tag>
 pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'a, A, M::Tag>
     where A: Ord + Clone, M: TagManager<A>, M::Tag: Clone + 'a {
     let root_tag = mgr.root_tag();
-    let start = Rc::new(g.start_rules().iter()
+    let start = Rc::new(closure(g, g.start_rules().iter()
         .map(CaretExpr::new)
         .map(|rhs| Entry { rule: Rule { symbol: 0, rhs }, tag: root_tag.clone() })
-        .collect::<Kernel<A, M::Tag>>());
+        .collect::<Kernel<A, M::Tag>>(), mgr));
     let mut kernels_map = BTreeMap::new();
     kernels_map.insert(start.clone(), 0usize);
     let mut queue = VecDeque::new();
     queue.push_back((0usize, start));
     let mut goto_table = BTreeMap::new();
     while let Some((idx, i)) = queue.pop_front() {
-        for (sym, states) in all_goto_sets(closure(g, &i, mgr)).get() {
-            let states = Rc::new(states.map(|entry| Entry {
+        for (sym, states) in all_goto_sets(&i).get() {
+            let states = Rc::new(closure(g, states.map(|entry| Entry {
                 tag: mgr.generate_tag(&[], &entry.tag),
                 rule: entry.rule,
-            }).collect::<Kernel<A, M::Tag>>());
+            }).collect::<Kernel<A, M::Tag>>(), mgr));
             use std::collections::btree_map::Entry::*;
             let k = kernels_map.len();
             let k = match kernels_map.entry(states.clone()) {
@@ -493,6 +432,7 @@ pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'
     }
     let goto_table = goto_table.into_iter()
         .map(|((from, sym), to)| (idx_map[from], sym, idx_map[to]))
+        .sorted_unstable()
         .collect::<Box<[_]>>();
     KernelSets { kernels: kernels.into_boxed_slice(), goto_table }
 }
@@ -507,7 +447,8 @@ pub trait TagResolver<A> {
     fn get_predecessors(&self, tag: usize) -> Vec<usize>;
     /// After the dependencies have been worked out, resolve a group of `Tag`s where their
     /// dependency graph is strongly connected (contains a loop).
-    fn resolve_group(&mut self, tags: impl Iterator<Item=usize>) -> Self::Resolved;
+    fn resolve_group(&mut self, tags: impl Iterator<Item=usize>,
+                     predecessors: impl Iterator<Item=Self::Resolved>) -> Self::Resolved;
 }
 
 #[derive(Derivative)]
@@ -539,7 +480,7 @@ impl<A, R: TagResolver<A>> Tarjan<A, R> {
         }
     }
 
-    fn run(mut self, resolver: &mut R, tags: impl Iterator<Item=usize>) -> Box<[Option<R::Resolved>]> where R::Resolved: Debug {
+    fn run(mut self, resolver: &mut R, tags: impl Iterator<Item=usize>) -> Box<[Option<R::Resolved>]> {
         for tag in tags {
             if !self.vertices[tag].visited {
                 self.visit(resolver, tag);
@@ -571,12 +512,13 @@ impl<A, R: TagResolver<A>> Tarjan<A, R> {
         }
 
         if self.vertices[this].visit_time == self.vertices[this].earliest_reachable {
-            let group = self.current_path[k..].iter();
-            let r = resolver.resolve_group(group.clone().copied());
-            for &t in group {
+            let group = self.current_path.split_off(k);
+            let ps = resolver.get_predecessors(this)
+                .into_iter().filter_map(|p| self.vertices[p].resolved.as_ref()).cloned();
+            let r = resolver.resolve_group(group.iter().copied(), ps);
+            for t in group {
                 self.vertices[t].resolved = Some(r.clone());
             }
-            self.current_path.truncate(k);
         }
 
         self.vertices[this].in_current_path = false;
@@ -603,6 +545,7 @@ pub fn resolve_tags<'a, A, R>(sets: KernelSets<'a, A, usize>, resolver: &mut R) 
     }
 }
 
+#[derive(Debug)]
 #[derive(Derivative)]
 #[derivative(Default(bound = "A: Ord"))]
 struct LookaheadsWithDep<A> {
@@ -718,8 +661,12 @@ impl<A: Ord + Clone> TagResolver<A> for LookaheadResolver<A> {
         self.tags[tag].depends_on.iter().copied().collect_vec()
     }
 
-    fn resolve_group<'a>(&mut self, tags: impl Iterator<Item=usize>) -> Self::Resolved {
+    fn resolve_group<'a>(&mut self, tags: impl Iterator<Item=usize>,
+                         predecessors: impl Iterator<Item=Self::Resolved>) -> Self::Resolved {
         let mut resolved = BTreeSet::new();
+        for p in predecessors {
+            resolved.extend(p.0.iter().cloned());
+        }
         let current = self.resolved.len();
         for tag in tags {
             resolved.extend(self.tags[tag].spontaneous.iter().cloned());
@@ -745,4 +692,270 @@ pub fn build<'a, A>(grammar: &'a Grammar<A>, first: &[Box<[A]>], deduce_to_empty
     let sets = all_kernel_sets(grammar, &mut tag_manager);
     let mut resolver = tag_manager.into_resolver();
     resolve_tags(sets, &mut resolver)
+}
+
+/// An entry of the `ACTION` table.
+///
+/// A missing entry denotes an error.
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub enum Action {
+    /// Accepts the input.
+    Accept,
+    /// Shift in the next token, and transition to another state.
+    Shift(u32),
+    /// Reduce according to a production rule.
+    Reduce {
+        /// Number of fragment parse trees to be popped from the stack.
+        ///
+        /// It is highly unlikely that any non-terminal symbol should be reduced from more than
+        /// 6,5536 fragment parse trees (which in turn would mean there is a production rule with
+        /// more than 6,5536 symbols as RHS).
+        count: u16,
+        /// The non-terminal symbol to be reduced to.
+        ///
+        /// It is highly unlikely that any non-terminal symbol should be represented by a integer
+        /// greater than 6,5536 (which in turn would mean there are more than 6,5536 of non-terminal
+        /// symbols in total, and thus there is no chance this grammar would ever be useful for any
+        /// practical parsing).
+        symbol: u16,
+    },
+}
+
+/// The LALR parsing table.
+#[derive(Debug, Eq, PartialEq)]
+pub struct Table<A> {
+    /// `ACTION` table: entries `(state, input, action)`.
+    pub action: Box<[(u32, Lookahead<A>, Action)]>,
+    /// `GOTO` table: entries `(state, non-terminal, state')`.
+    pub goto: Box<[(u32, u16, u32)]>,
+}
+
+/// Conflicts in LALR kernel sets.
+pub struct LalrConflict<'a, A> {
+    /// Is there any shift-reduce conflict?
+    pub shift_reduce_conflict: bool,
+    /// Is there any reduce-reduce conflict?
+    pub reduce_reduce_conflict: bool,
+    /// The problematic kernel set.
+    pub kernel_set: &'a FrozenKernel<'a, A, Lookaheads<A>>,
+}
+
+impl<'a, A, Tag> KernelSets<'a, A, Tag> {
+    /// Get the corresponding [`Action`] for a production rule.
+    pub fn action_of(&self, rule: &Rule<'a, A>) -> Option<Action> {
+        if rule.rhs.rest_part().is_empty() {
+            Some(if rule.symbol == 0 { Action::Accept } else {
+                Action::Reduce {
+                    symbol: rule.symbol as u16,
+                    count: rule.rhs.consumed_part().len() as u16,
+                }
+            })
+        } else {
+            None
+        }
+    }
+}
+
+struct ActionInserter<'s, 'a, A> {
+    target_actions: &'s mut BTreeMap<Lookahead<A>, Action>,
+    current_kernel: &'a FrozenKernel<'a, A, Lookaheads<A>>,
+    error: Option<LalrConflict<'a, A>>,
+}
+
+impl<'s, 'a, A: Ord> ActionInserter<'s, 'a, A> {
+    fn new(target_actions: &'s mut BTreeMap<Lookahead<A>, Action>,
+           current_kernel: &'a FrozenKernel<'a, A, Lookaheads<A>>) -> Self {
+        ActionInserter { target_actions, current_kernel, error: None }
+    }
+
+    fn insert(&mut self, lookahead: Lookahead<A>, act: Action) {
+        if let Some(old_act) = self.target_actions.insert(lookahead, act) {
+            if matches!(old_act, Action::Shift(_)) && matches!(act, Action::Shift(_)) { return; }
+            let err = if let Some(err) = &mut self.error { err } else {
+                self.error = Some(LalrConflict {
+                    kernel_set: self.current_kernel,
+                    reduce_reduce_conflict: false,
+                    shift_reduce_conflict: false,
+                });
+                self.error.as_mut().unwrap()
+            };
+            match (old_act, act) {
+                (Action::Shift(_), Action::Reduce { .. }) |
+                (Action::Reduce { .. }, Action::Shift(_)) => err.shift_reduce_conflict = true,
+                (Action::Reduce { .. }, Action::Reduce { .. }) => err.reduce_reduce_conflict = true,
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn into_error(self) -> Option<LalrConflict<'a, A>> { self.error }
+}
+
+impl<'a, A: Ord + Clone> TryFrom<&'a KernelSets<'a, A, Lookaheads<A>>> for Table<A> {
+    type Error = Vec<LalrConflict<'a, A>>;
+
+    fn try_from(sets: &'a KernelSets<'a, A, Lookaheads<A>>) -> Result<Table<A>, Self::Error> {
+        let mut action = Vec::new();
+        let mut goto = Vec::new();
+        let mut errs = Vec::new();
+        for (k, ker) in sets.kernels.iter().enumerate() {
+            let mut actions = BTreeMap::new();
+            let mut inserter = ActionInserter::new(&mut actions, ker);
+            for entry in ker.0.iter() {
+                if let Some(act) = sets.action_of(&entry.rule) {
+                    for x in entry.tag.0.iter() {
+                        inserter.insert(x.clone(), act);
+                    }
+                } else {
+                    let l = sets.goto_table.partition_point(|(n, _, _)| *n < k);
+                    let r = sets.goto_table.partition_point(|(n, _, _)| *n <= k);
+                    for (_, sym, t) in &sets.goto_table[l..r] {
+                        let t = *t as u32;
+                        match sym {
+                            Symbol::Terminal(a) => inserter.insert(Lookahead::new(a.clone()), Action::Shift(t)),
+                            Symbol::NonTerminal(nt) => goto.push((k as u32, nt.get() as u16, t)),
+                        }
+                    }
+                }
+            }
+            if let Some(err) = inserter.into_error() { errs.push(err) }
+            action.extend(actions.into_iter().map(|(a, act)| (k as u32, a, act)));
+        }
+        if !errs.is_empty() { Err(errs) } else {
+            Ok(Table {
+                action: action.into_boxed_slice(),
+                goto: goto.into_boxed_slice(),
+            })
+        }
+    }
+}
+
+/// Simulation of `LALR(1)` parsing.
+pub mod simulation {
+    use std::fmt::{Display, Formatter};
+    use itertools::Itertools;
+    use crate::backend::ll1::Lookahead;
+    use crate::backend::lalr1::Action;
+
+    /// Parse tree: result of simulation of `LALR(1)`.
+    #[derive(Debug, Clone)]
+    pub enum Parse<A> {
+        /// Terminals: leaves of a [`Parse`] tree.
+        Terminal(A),
+        /// Non-terminals: internal nodes of a [`Parse`] tree.
+        NonTerminal {
+            /// The non-terminal symbol of this node.
+            symbol: u16,
+            /// Children nodes, reduced according to the production rules.
+            children: Box<[Parse<A>]>,
+        },
+    }
+
+    impl<A: Display> Parse<A> {
+        /// Pretty print this parse tree, provided names for the non-terminal symbols.
+        pub fn pretty<'a, T>(&'a self, dict: &'a [T]) -> Pretty<'a, A, T> {
+            Pretty(self, dict)
+        }
+    }
+
+    /// Pretty print for parse trees.
+    pub struct Pretty<'a, A, T> (&'a Parse<A>, &'a [T]);
+
+    impl<'a, A: Display, T: AsRef<str>> Display for Pretty<'a, A, T> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            self.fmt_indent(f, 0)
+        }
+    }
+
+    impl<'a, A: Display, T: AsRef<str>> Pretty<'a, A, T> {
+        fn fmt_indent(&self, f: &mut Formatter<'_>, indent: usize) -> std::fmt::Result {
+            write!(f, "{:width$}", "", width = indent * 2)?;
+            match self.0 {
+                Parse::Terminal(a) => writeln!(f, "\"{}\"", a),
+                Parse::NonTerminal { symbol, children } => {
+                    writeln!(f, "NT#[ {} ]", self.1[*symbol as usize].as_ref())?;
+                    for child in children.iter() {
+                        child.pretty(self.1).fmt_indent(f, indent + 1)?;
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// A parse error.
+    #[derive(Debug)]
+    pub struct ParseError<A> {
+        /// Unexpected current token.
+        pub unexpected: Lookahead<A>,
+        /// We are currently expecting the following symbols
+        pub expecting: Box<[Lookahead<A>]>,
+        /// The current parse stack.
+        pub parse_stack: Vec<Parse<A>>,
+        /// The current state stack.
+        pub state_stack: Vec<u32>,
+    }
+
+    impl<A: Ord + Clone> super::Table<A> {
+        fn parse_error(&self, unexpected: Lookahead<A>,
+                       parse_stack: Vec<Parse<A>>,
+                       state_stack: Vec<u32>) -> ParseError<A> {
+            ParseError {
+                unexpected,
+                expecting: {
+                    let current_state = *state_stack.last().unwrap();
+                    let l = self.action.partition_point(|(s, _, _)| *s < current_state);
+                    let r = self.action.partition_point(|(s, _, _)| *s <= current_state);
+                    self.action[l..r].iter()
+                        .map(|(_, a, _)| a.clone())
+                        .collect_vec()
+                        .into_boxed_slice()
+                },
+                parse_stack,
+                state_stack,
+            }
+        }
+
+        /// Simulate LALR parsing on the given input.
+        pub fn simulate_parse<'a>(&self, input: impl Iterator<Item=&'a A>)
+                                  -> Result<Parse<A>, ParseError<A>> where A: 'a {
+            let mut state_stack = vec![0];
+            let mut parse_stack = Vec::new();
+            let mut input = input.map(Lookahead::new)
+                .chain(std::iter::once(Lookahead::END_OF_INPUT))
+                .peekable();
+            while let Some(tok) = input.peek().copied() {
+                let st = state_stack.last().copied().unwrap();
+                let act = match self.action.binary_search_by_key(
+                    &(st, tok), |(s, a, _)| (*s, a.as_ref())) {
+                    Ok(act) => self.action[act].2,
+                    Err(_) => return Err(self.parse_error(tok.cloned(), parse_stack, state_stack)),
+                };
+                match act {
+                    Action::Accept => {
+                        assert_eq!(parse_stack.len(), 1, "cannot accept more than 1 parse trees");
+                        return Ok(parse_stack.into_iter().next().unwrap());
+                    }
+                    Action::Shift(s) => {
+                        let tok = tok.expect("cannot shift in END_OF_INPUT").to_owned();
+                        parse_stack.push(Parse::Terminal(tok));
+                        state_stack.push(s);
+                        let _ = input.next();
+                    }
+                    Action::Reduce { count, symbol } => {
+                        let children = parse_stack
+                            .split_off(parse_stack.len() - count as usize)
+                            .into_boxed_slice();
+                        parse_stack.push(Parse::NonTerminal { symbol, children });
+                        state_stack.truncate(state_stack.len() - count as usize);
+                        let s0 = *state_stack.last().unwrap();
+                        let (_, _, t) = self.goto[self.goto.binary_search_by_key(
+                            &(s0, symbol), |(s, sym, _)| (*s, *sym)).unwrap()];
+                        state_stack.push(t);
+                    }
+                }
+            }
+            Err(self.parse_error(Lookahead::END_OF_INPUT, parse_stack, state_stack))
+        }
+    }
 }
