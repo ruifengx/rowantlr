@@ -18,4 +18,4 @@
 
 //! Intermediate Representations.
 
-pub mod grammar;
+pub mod syntax;

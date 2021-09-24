@@ -95,7 +95,7 @@ pub fn epsilon<A>() -> Expr<A> { Box::new([]) as _ }
 ///
 /// ```
 /// # use rowantlr::r#box;
-/// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+/// # use rowantlr::ir::syntax::{Grammar, CaretExpr, Symbol::*};
 /// let _ = Grammar::<()>::build(|g| {
 ///     let nt = g.add_non_terminal();
 ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
@@ -146,7 +146,7 @@ impl<'a, A> CaretExpr<'a, A> {
     ///
     /// ```
     /// # use rowantlr::r#box;
-    /// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+    /// # use rowantlr::ir::syntax::{Grammar, CaretExpr, Symbol::*};
     /// let _ = Grammar::<()>::build(|g| {
     ///     let nt = g.add_non_terminal();
     ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
@@ -160,7 +160,7 @@ impl<'a, A> CaretExpr<'a, A> {
     ///
     /// ```
     /// # use rowantlr::r#box;
-    /// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+    /// # use rowantlr::ir::syntax::{Grammar, CaretExpr, Symbol::*};
     /// let _ = Grammar::<()>::build(|g| {
     ///     let nt = g.add_non_terminal();
     ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
@@ -194,7 +194,7 @@ impl<'a, A> CaretExpr<'a, A> {
     ///
     /// ```
     /// # use rowantlr::r#box;
-    /// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+    /// # use rowantlr::ir::syntax::{Grammar, CaretExpr, Symbol::*};
     /// let _ = Grammar::<()>::build(|g| {
     ///     let nt = g.add_non_terminal();
     ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];
@@ -209,7 +209,7 @@ impl<'a, A> CaretExpr<'a, A> {
     ///
     /// ```
     /// # use rowantlr::r#box;
-    /// # use rowantlr::ir::grammar::{Grammar, CaretExpr, Symbol::*};
+    /// # use rowantlr::ir::syntax::{Grammar, CaretExpr, Symbol::*};
     /// let _ = Grammar::<()>::build(|g| {
     ///     let nt = g.add_non_terminal();
     ///     let expr = r#box![Terminal('a'), NonTerminal(nt), Terminal('b')];

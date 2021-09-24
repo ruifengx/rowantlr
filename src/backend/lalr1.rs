@@ -30,7 +30,7 @@
 //! #![allow(non_snake_case)]
 //! use std::convert::TryFrom;
 //! use rowantlr::r#box;
-//! use rowantlr::ir::grammar::{Grammar, epsilon, Symbol::*, Expr};
+//! use rowantlr::ir::syntax::{Grammar, epsilon, Symbol::*, Expr};
 //! use rowantlr::backend::{ll1, ll1::Lookahead, lalr1, lalr1::Action::*};
 //!
 //! let mut g = Grammar::<&'static str>::build(|g| {
@@ -89,14 +89,14 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use derivative::Derivative;
 use itertools::{Itertools, GroupBy};
-use crate::ir::grammar::{CaretExpr, Grammar, Symbol};
+use crate::ir::syntax::{CaretExpr, Grammar, Symbol};
 use crate::backend::ll1::Lookahead;
 use crate::utils::{DisplayDot2TeX, simple::DisplayDot2TeX as DisplayDot2TeX_};
 use std::convert::TryFrom;
 
 /// So-said "simple" types, with the tag types muted.
 pub mod simple {
-    use crate::ir::grammar::Symbol;
+    use crate::ir::syntax::Symbol;
 
     /// Simple LALR entries, with no tag data.
     pub type Entry<'a, A> = super::Entry<'a, A, ()>;

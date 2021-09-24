@@ -30,7 +30,7 @@
 //! ```
 //! #![allow(non_snake_case)]
 //! use rowantlr::r#box;
-//! use rowantlr::ir::grammar::{Grammar, epsilon, Symbol::*};
+//! use rowantlr::ir::syntax::{Grammar, epsilon, Symbol::*};
 //! use rowantlr::backend::ll1::{calc_deduce_to_empty, calc_first};
 //!
 //! let mut g = Grammar::<&'static str>::build(|g| {
@@ -68,7 +68,7 @@
 use std::borrow::Borrow;
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
-use crate::ir::grammar::{Grammar, Symbol};
+use crate::ir::syntax::{Grammar, Symbol};
 use crate::utils::DisplayDot2TeX;
 
 /// A lookahead token.
