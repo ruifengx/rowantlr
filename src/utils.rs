@@ -172,3 +172,17 @@ impl<Env: ?Sized> DisplayDot2TeX<Env> for str {
         Ok(())
     }
 }
+
+/// Mimic the postfix self-increment.
+///
+/// ```
+/// # use rowantlr::utils::inc;
+/// let mut n = 42;
+/// assert_eq!(inc(&mut n), 42);
+/// assert_eq!(n, 43);
+/// ```
+pub fn inc(n: &mut usize) -> usize {
+    let res = *n;
+    *n += 1;
+    res
+}

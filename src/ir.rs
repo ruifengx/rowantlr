@@ -19,3 +19,4 @@
 //! Intermediate Representations.
 
 pub mod syntax;
+pub mod lexical;
