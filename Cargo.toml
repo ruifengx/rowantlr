@@ -7,7 +7,7 @@ repository = "https://github.com/ruifengx/rowantlr.git"
 homepage = "https://github.com/ruifengx/rowantlr.git"
 license = "AGPL-3.0-or-later"
 readme = "README.md"
-description = "An ANTLR like parser generator framework targetting rowan."
+description = "An ANTLR like parser generator framework targeting rowan."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

@@ -1,5 +1,5 @@
 /*
- * rowantlr: ANTLR-like parser generator framework targetting rowan
+ * rowantlr: ANTLR-like parser generator framework targeting rowan
  * Copyright (C) 2021  Xie Ruifeng
  *
  * This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-//! rowantlr: ANTLR-like parser generator framework targetting rowan.
+//! rowantlr: ANTLR-like parser generator framework targeting rowan.
 
 #![warn(missing_docs)]
 
