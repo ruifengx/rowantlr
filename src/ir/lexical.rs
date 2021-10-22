@@ -48,7 +48,7 @@
 
 use std::collections::BTreeSet;
 use std::ops::{BitAnd, BitOr, Deref, DerefMut};
-use crate::utils::IterHelper;
+use crate::utils::{Dict, IterHelper};
 
 /// Regular expressions.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
@@ -280,7 +280,7 @@ pub struct Dfa<A> {
     /// Number of states in this DFA.
     pub state_count: usize,
     /// Transitions (arcs) of this DFA.
-    pub transitions: Box<[(usize, A, usize)]>,
+    pub transitions: Dict<(usize, A, usize)>,
 }
 
 /// DFA related data structures.
@@ -317,17 +317,15 @@ pub mod dfa {
             let mut remaining_input = input.into_iter();
             let mut current_state = start_state;
             for current_input in &mut remaining_input {
-                let current_input_ref = current_input.borrow();
-                let p = match self.transitions.binary_search_by_key(
-                    &(current_state, current_input_ref), |(s, a, _)| (*s, a)) {
-                    Ok(p) => p,
-                    Err(_) => return Err(InvalidInput {
+                current_state = match self.transitions
+                    .get((&current_state, current_input.borrow())) {
+                    Some(p) => *p,
+                    None => return Err(InvalidInput {
                         current_state,
                         current_input,
                         remaining_input,
                     }),
                 };
-                current_state = self.transitions[p].2;
             }
             Ok(current_state)
         }
@@ -454,7 +452,7 @@ pub mod dfa {
         /// [`built`](Builder::build) from an [`Expr`](super::Expr), and if this reachability
         /// information is generated from [`BuildResult::reachability`], follow this predecessor
         /// should give a shortest path from the initial state to the current state.
-        pub predecessor: Dict<usize, (usize, A)>,
+        pub predecessor: Dict<(usize, (usize, A))>,
     }
 
     impl<A: Clone> Reachability<A> {
@@ -463,7 +461,7 @@ pub mod dfa {
         pub fn try_get_path_for(&self, state: usize) -> Option<Vec<(usize, A)>> {
             let mut current_state = state;
             let mut result_path = Vec::new();
-            while let Some((pred, a)) = self.predecessor.get(&current_state) {
+            while let Some((pred, a)) = self.predecessor.get((&current_state, )) {
                 result_path.push((*pred, a.clone()));
                 current_state = *pred;
             }
@@ -484,7 +482,7 @@ pub mod dfa {
         pub position_info: Vec<PosEntry<A, Tag>>,
     }
 
-    impl<A: Clone, Tag> BuildResult<A, Tag> {
+    impl<A: Ord + Clone, Tag> BuildResult<A, Tag> {
         /// Calculate reachability information for DFA states.
         pub fn reachability(&self) -> Reachability<A> {
             let mut predecessor = vec![None; self.dfa.state_count];
@@ -530,7 +528,7 @@ pub mod dfa {
         /// The resulted DFA.
         pub dfa: Dfa<A>,
         /// Mapping from states to tags.
-        pub tags: Dict<usize, Tag>,
+        pub tags: Dict<(usize, Tag)>,
     }
 
     impl<A: Ord, Tag: Clone> Resolved<A, Tag> {
@@ -538,7 +536,7 @@ pub mod dfa {
         pub fn run<'a, C, I>(&self, input: I) -> Result<Option<Tag>, InvalidInput<C, I::IntoIter>>
             where A: 'a, C: 'a + Borrow<A>, I: IntoIterator<Item=C> {
             let s = self.dfa.run(0, input)?;
-            Ok(self.tags.get(&s).cloned())
+            Ok(self.tags.get((&s, )).map(Tag::clone))
         }
     }
 
