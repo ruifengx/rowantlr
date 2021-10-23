@@ -47,7 +47,7 @@
 //! ```
 
 use std::collections::BTreeSet;
-use std::ops::{BitAnd, BitOr, Deref, DerefMut};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref, DerefMut};
 use crate::utils::{Dict, IterHelper};
 
 /// Regular expressions.
@@ -175,6 +175,14 @@ impl BitOr for ExprInfo {
     }
 }
 
+impl BitOrAssign for ExprInfo {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.nullable = self.nullable || rhs.nullable;
+        self.first_pos.extend(rhs.first_pos.iter().copied());
+        self.last_pos.extend(rhs.last_pos.iter().copied());
+    }
+}
+
 impl BitAnd for ExprInfo {
     type Output = ExprInfo;
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -190,6 +198,18 @@ impl BitAnd for ExprInfo {
             } else {
                 rhs.last_pos
             },
+        }
+    }
+}
+
+impl BitAndAssign for ExprInfo {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.nullable = self.nullable && rhs.nullable;
+        if self.nullable {
+            self.first_pos.extend(rhs.first_pos.iter().copied());
+        }
+        if rhs.nullable {
+            self.last_pos.extend(rhs.last_pos.iter().copied());
         }
     }
 }
@@ -649,6 +669,18 @@ impl<A: Ord + Clone> Expr<A> {
     pub fn build(&self) -> dfa::BuildResult<A, ()> {
         let mut builder = dfa::Builder::default();
         let info = self.traverse_extended(&mut builder, ());
+        builder.build(info)
+    }
+
+    /// Build a [`Dfa`] from many regular expressions.
+    /// See also [`dfa::Builder::build`].
+    pub fn build_many<'a, I>(exprs: I) -> dfa::BuildResult<A, ()>
+        where I: IntoIterator<Item=&'a Expr<A>>, A: 'a {
+        let mut builder = dfa::Builder::default();
+        let mut info = ExprInfo::default();
+        for expr in exprs {
+            info |= expr.traverse_extended(&mut builder, ());
+        }
         builder.build(info)
     }
 }
