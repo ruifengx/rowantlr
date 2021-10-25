@@ -45,6 +45,46 @@
 //! assert_eq!(current_input, 'b');
 //! assert_eq!(remaining_input.as_str(), "aaa");
 //! ```
+//!
+//! Use [`Expr::build_many`] to build [`Dfa`] from multiple regular expressions:
+//!
+//! ```
+//! use rowantlr::ir::lexical::{Expr, PosInfo};
+//! // start with 'a', end with 'b'
+//! let e1 = Expr::concat([
+//!     Expr::singleton('a'),
+//!     Expr::many(Expr::any_of("ab")),
+//!     Expr::singleton('b'),
+//! ]);
+//! // even number of 'a's and 'b's.
+//! let e2 = Expr::many(Expr::union([
+//!     Expr::from("aa"),
+//!     Expr::from("bb"),
+//!     Expr::concat([
+//!         Expr::from("ab") | Expr::from("ba"),
+//!         Expr::many(Expr::from("aa") | Expr::from("bb")),
+//!         Expr::from("ab") | Expr::from("ba"),
+//!     ]),
+//! ]));
+//! // 'e1' and 'e2' should intersect.
+//! let result = Expr::build_many([(&e1, 0), (&e2, 1)]);
+//! let (result, conflicts) = result.try_resolve().expect_err("conflict expected");
+//! // exactly one conflict is detected.
+//! assert_eq!(conflicts.len(), 1);
+//! let conflict = &conflicts[0];
+//! // tag '0' and tag '1' are involved in this conflict.
+//! assert_eq!(vec![0, 1], conflict.conflicting_tags(&result).copied().collect::<Vec<_>>());
+//! // as for the different interpretations for some problematic input ...
+//! conflict.interpretations.iter().for_each(|ps| {
+//!     // all interpretations is indeed of the same input "aabb".
+//!     assert_eq!("aabb".to_string(), ps.split_last().unwrap().1.iter()
+//!         .map(|&p| result.position_info[p].info.into_normal().unwrap())
+//!         .collect::<String>());
+//!     // each position list is chained according to the 'follow_pos' relation.
+//!     ps.windows(2).for_each(|p|
+//!         assert!(result.position_info[p[0]].follow_pos.contains(&p[1])));
+//! });
+//! ```
 
 use std::collections::BTreeSet;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref, DerefMut};
@@ -128,6 +168,33 @@ impl<A> Expr<A> {
     /// Closure, or the Kleene star: `x* = ε | x+`.
     pub fn many(expr: Expr<A>) -> Expr<A> {
         Expr::optional(Expr::some(expr))
+    }
+}
+
+impl<A> BitOr for Expr<A> {
+    type Output = Expr<A>;
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Expr::union([self, rhs])
+    }
+}
+
+impl<A> BitAnd for Expr<A> {
+    type Output = Expr<A>;
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Expr::concat([self, rhs])
+    }
+}
+
+impl Expr<char> {
+    /// Union of all the characters in some string.
+    pub fn any_of(s: &str) -> Self {
+        Expr::union(s.chars().map(Expr::singleton))
+    }
+}
+
+impl<'a> From<&'a str> for Expr<char> {
+    fn from(s: &str) -> Self {
+        Expr::concat(s.chars().map(Expr::singleton))
     }
 }
 
@@ -215,12 +282,36 @@ impl BitAndAssign for ExprInfo {
 }
 
 /// How is this position generated.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum PosInfo<A, Tag> {
     /// From a non-`ε` leaf node, i.e. an [`Op::Singleton`].
     Normal(A),
     /// From a phantom "accept" node, with a tag attached.
     Accept(Tag),
+}
+
+impl<A, Tag> PosInfo<A, Tag> {
+    /// Converts from `&PosInfo<A, Tag>` to `PosInfo<&A, &Tag>`.
+    pub fn as_ref(&self) -> PosInfo<&A, &Tag> {
+        match self {
+            PosInfo::Normal(a) => PosInfo::Normal(a),
+            PosInfo::Accept(tag) => PosInfo::Accept(tag),
+        }
+    }
+    /// Match against [`PosInfo::Normal`].
+    pub fn into_normal(self) -> Option<A> {
+        match self {
+            PosInfo::Normal(a) => Some(a),
+            PosInfo::Accept(_) => None,
+        }
+    }
+    /// Match against [`PosInfo::Accept`].
+    pub fn into_accept(self) -> Option<Tag> {
+        match self {
+            PosInfo::Normal(_) => None,
+            PosInfo::Accept(tag) => Some(tag),
+        }
+    }
 }
 
 /// Recursive visitor for [`Expr`]s.
@@ -475,19 +566,29 @@ pub mod dfa {
         pub predecessor: Dict<(usize, (usize, A))>,
     }
 
-    impl<A: Clone> Reachability<A> {
+    impl<A: Eq> Reachability<A> {
         /// Try to generate a path from the initial state to a specific state.
         /// Every element in the path is a `(state, input)` pair.
-        pub fn try_get_path_for(&self, state: usize) -> Option<Vec<(usize, A)>> {
+        pub fn try_get_paths_for<Tag>(&self, state: usize, build_result: &BuildResult<A, Tag>)
+                                      -> Option<Vec<Vec<usize>>> {
             let mut current_state = state;
-            let mut result_path = Vec::new();
+            let mut result_paths = build_result.state_mapping[state].iter()
+                .filter(|&&p| build_result.position_info[p].is_accept())
+                .map(|&p| vec![p]).collect_vec();
             while let Some((pred, a)) = self.predecessor.get((&current_state, )) {
-                result_path.push((*pred, a.clone()));
+                for path in &mut result_paths {
+                    let last_pos = *path.last().unwrap();
+                    let pos = build_result.state_mapping[*pred].iter().copied()
+                        .find(|&p| build_result.position_info[p].follow_pos.contains(&last_pos)
+                            && build_result.position_info[p].info.as_ref().into_normal() == Some(a))
+                        .unwrap();
+                    path.push(pos);
+                }
                 current_state = *pred;
             }
             if current_state != 0 { return None; }
-            result_path.reverse();
-            Some(result_path)
+            result_paths.iter_mut().for_each(|path| path.reverse());
+            Some(result_paths)
         }
     }
 
@@ -516,32 +617,6 @@ pub mod dfa {
         }
     }
 
-    impl<A: PartialEq, Tag> BuildResult<A, Tag> {
-        /// Resolve a path in the [`Dfa`] to a series of positions.
-        pub fn path_to_positions(&self, path: &[(usize, A)]) -> Vec<usize> {
-            let mut path = path.iter().rev();
-            let mut result = Vec::new();
-            let mut last_pos = match path.next() {
-                None => return result,
-                Some((state, input)) =>
-                    self.state_mapping[*state].iter().copied()
-                        .find(|&p| matches!(&self.position_info[p].info,
-                            PosInfo::Normal(a) if a == input))
-                        .unwrap(),
-            };
-            result.push(last_pos);
-            for (state, input) in path {
-                last_pos = self.state_mapping[*state].iter().copied()
-                    .find(|&p| self.position_info[p].follow_pos.contains(&last_pos)
-                        && matches!(&self.position_info[p].info, PosInfo::Normal(a) if a == input))
-                    .unwrap();
-                result.push(last_pos);
-            }
-            result.reverse();
-            result
-        }
-    }
-
     /// [`BuildResult`] with conflicts resolved.
     #[derive(Debug)]
     pub struct Resolved<A, Tag> {
@@ -563,12 +638,24 @@ pub mod dfa {
     /// Conflict in DFA states.
     #[derive(Debug)]
     pub struct Conflict {
-        /// An example input string for this conflict. Characters of this input string is encoded
-        /// as positions on the original regular expression (instead of the input character `A`)
-        /// for better error reporting.
-        pub example_input: Box<[usize]>,
-        /// Possible tags for `example_input`, encoded as positions on the original regular expression.
-        pub conflicting_tags: Box<[usize]>,
+        /// An example input string for this conflict, different interpretations provided.
+        /// Characters of this input string is encoded as positions on the original regular
+        /// expression (instead of the input character `A`) for better error reporting.
+        ///
+        /// The last position in each position list is guaranteed to be an [`PosInfo::Accept`]ing
+        /// position, and can be used to extract the conflicting tags.
+        pub interpretations: Box<[Box<[usize]>]>,
+    }
+
+    impl Conflict {
+        /// Get the conflicting tags for this conflict.
+        pub fn conflicting_tags<'a, A, Tag>(&'a self, build_result: &'a BuildResult<A, Tag>)
+                                            -> impl Iterator<Item=&'a Tag> {
+            self.interpretations.iter().map(|ps| {
+                let p = *ps.last().unwrap();
+                build_result.position_info[p].info.as_ref().into_accept().unwrap()
+            })
+        }
     }
 
     /// Result for resolving conflicts.
@@ -641,14 +728,11 @@ pub mod dfa {
                         PosInfo::Accept(tag) => { result.insert(k, tag.clone()); }
                         PosInfo::Normal(_) => unreachable!(),
                     }
-                    _ => {
-                        let reach = reachability.get_or_insert_with(|| self.reachability());
-                        let path = reach.try_get_path_for(k).unwrap();
-                        errors.push(Conflict {
-                            example_input: self.path_to_positions(&path).into_boxed_slice(),
-                            conflicting_tags: ps.into_boxed_slice(),
-                        })
-                    }
+                    _ => errors.push(Conflict {
+                        interpretations: reachability.get_or_insert_with(|| self.reachability())
+                            .try_get_paths_for(k, &self).unwrap()
+                            .into_iter().map(Vec::into_boxed_slice).collect(),
+                    })
                 }
             }
             if errors.is_empty() {
@@ -674,12 +758,12 @@ impl<A: Ord + Clone> Expr<A> {
 
     /// Build a [`Dfa`] from many regular expressions.
     /// See also [`dfa::Builder::build`].
-    pub fn build_many<'a, I>(exprs: I) -> dfa::BuildResult<A, ()>
-        where I: IntoIterator<Item=&'a Expr<A>>, A: 'a {
+    pub fn build_many<'a, I, Tag>(exprs: I) -> dfa::BuildResult<A, Tag>
+        where I: IntoIterator<Item=(&'a Expr<A>, Tag)>, A: 'a {
         let mut builder = dfa::Builder::default();
         let mut info = ExprInfo::default();
-        for expr in exprs {
-            info |= expr.traverse_extended(&mut builder, ());
+        for (expr, tag) in exprs {
+            info |= expr.traverse_extended(&mut builder, tag);
         }
         builder.build(info)
     }
