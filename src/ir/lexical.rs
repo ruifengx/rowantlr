@@ -46,10 +46,12 @@
 //! assert_eq!(remaining_input.as_str(), "aaa");
 //! ```
 //!
-//! Use [`Expr::build_many`] to build [`Dfa`] from multiple regular expressions:
+//! Use [`Expr::build_many`] to build [`Dfa`] from multiple regular expressions, and use
+//! [`dfa::BuildResult::apply_hint`] to resolve a conflict ([`dfa::BuildResult::apply_hints`] can
+//! also be used to resolve conflicts in batch):
 //!
 //! ```
-//! use rowantlr::ir::lexical::{Expr, PosInfo};
+//! use rowantlr::ir::lexical::{Expr, PosInfo, dfa::ResolveError};
 //! // start with 'a', end with 'b'
 //! let e1 = Expr::concat([
 //!     Expr::singleton('a'),
@@ -84,6 +86,26 @@
 //!     ps.windows(2).for_each(|p|
 //!         assert!(result.position_info[p[0]].follow_pos.contains(&p[1])));
 //! });
+//! // apply a hint to resolve the conflict.
+//! let mut result = result;
+//! match result.apply_hint("aabb".chars(), 0) {
+//!     ResolveError::Resolved(s) => {
+//!         // we indeed resolved the conflict between tag '0' and tag '1' for input "aabb".
+//!         assert_eq!(2, s.len());
+//!         assert!(matches!(result.position_info[s[0]].info, PosInfo::Accept(0)));
+//!         assert!(matches!(result.position_info[s[1]].info, PosInfo::Accept(1)));
+//!     }
+//!     err => panic!(r#""aabb" should resolve a conflict, but we got {:?} instead"#, err),
+//! }
+//! // now we are ready to build the DFA.
+//! let resolved = result.try_resolve().expect("no more conflict expected");
+//! // the following two inputs have no conflict from the very beginning:
+//! assert_eq!(Some(0), resolved.run("abb".chars()).unwrap());
+//! assert_eq!(Some(1), resolved.run("bbaa".chars()).unwrap());
+//! // the hint we used to resolve the conflict behaves well:
+//! assert_eq!(Some(0), resolved.run("aabb".chars()).unwrap());
+//! // other conflicts are solved just as for the hint:
+//! assert_eq!(Some(0), resolved.run("abab".chars()).unwrap());
 //! ```
 
 use std::collections::BTreeSet;
@@ -659,6 +681,7 @@ pub mod dfa {
     }
 
     /// Result for resolving conflicts.
+    #[derive(Debug)]
     pub enum ResolveError<A, Tag, Input> {
         /// No error. Original mapping returned.
         Resolved(Box<[usize]>),
@@ -671,6 +694,7 @@ pub mod dfa {
     }
 
     /// Decide what to do next for a non-accepting state.
+    #[derive(Debug)]
     pub struct NotAcceptState<Tag> {
         /// The index of the state in the [`Dfa`].
         pub state_index: usize,
@@ -680,9 +704,9 @@ pub mod dfa {
 
     impl<A: Ord, Tag: Ord> BuildResult<A, Tag> {
         /// Try to resolve a conflict using a hint: which `tag` should be assigned to some `input`.
-        pub fn apply_hint<'a, I>(&mut self, input: I, tag_intended: Tag)
-                                 -> ResolveError<&'a A, Tag, I::IntoIter>
-            where I: IntoIterator<Item=&'a A>, A: 'a {
+        pub fn apply_hint<C, I>(&mut self, input: I, tag_intended: Tag)
+                                -> ResolveError<C, Tag, I::IntoIter>
+            where I: IntoIterator<Item=C>, C: Borrow<A> {
             let state_index = match self.dfa.run(0, input) {
                 Err(err) => return ResolveError::InvalidInput(err),
                 Ok(s) => s,
@@ -707,8 +731,8 @@ pub mod dfa {
 
         /// Try to resolve conflicts using a series of hints.
         /// See also [`apply_hint`](BuildResult::apply_hint).
-        pub fn apply_hints<'a, I, H>(&mut self, hints: H) -> Vec<ResolveError<&'a A, Tag, I::IntoIter>>
-            where I: IntoIterator<Item=&'a A>, H: IntoIterator<Item=(I, Tag)>, A: 'a {
+        pub fn apply_hints<C, I, H>(&mut self, hints: H) -> Vec<ResolveError<C, Tag, I::IntoIter>>
+            where I: IntoIterator<Item=C>, H: IntoIterator<Item=(I, Tag)>, C: Borrow<A> {
             hints.into_iter().map(|hint| self.apply_hint(hint.0, hint.1)).collect()
         }
 
