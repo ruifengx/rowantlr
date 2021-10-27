@@ -32,6 +32,7 @@
 //! use rowantlr::r#box;
 //! use rowantlr::ir::syntax::{Grammar, epsilon, Symbol::*, Expr};
 //! use rowantlr::backend::{ll1, ll1::Lookahead, lalr1, lalr1::Action::*};
+//! # use rowantlr::utils::DisplayDot2TeX;
 //!
 //! let mut g = Grammar::<&'static str>::build(|g| {
 //!     let [S, L, R] = g.add_non_terminals();
@@ -49,6 +50,7 @@
 //! let deduce_to_empty = ll1::calc_deduce_to_empty(&g);
 //! let first = ll1::calc_first(&g, &deduce_to_empty);
 //! let kernels = lalr1::build(&g, &first, &deduce_to_empty);
+//! # println!("{}", kernels.display_dot2tex(&["S'", "S", "L", "R"]));
 //! let table = lalr1::Table::try_from(&kernels).ok().unwrap();
 //! let input = ["*", "*", "id", "=", "id"];
 //! let parse = table.simulate_parse(input.iter()).unwrap();
