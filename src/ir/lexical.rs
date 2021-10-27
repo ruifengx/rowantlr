@@ -144,6 +144,41 @@ impl<A> Expr<A> {
     /// Empty string: `ε`.
     pub fn epsilon() -> Expr<A> { Expr::concat([]) }
     /// Union: `x₁ | x₂ | ... | xₙ`.
+    ///
+    /// If input has only one branch, no extra [`Op::Union`] layer is introduced:
+    /// ```
+    /// # use rowantlr::ir::lexical::Expr;
+    /// let e = Expr::from("abc");
+    /// assert_eq!(e.clone(), Expr::union([e]));
+    /// ```
+    ///
+    /// Nested [`Op::Union`] structures will be simplified:
+    /// ```
+    /// # use rowantlr::ir::lexical::Expr;
+    /// assert_eq!(Expr::union([
+    ///     Expr::singleton('a'),
+    ///     Expr::any_of("bc"),
+    ///     Expr::singleton('d'),
+    /// ]), Expr::any_of("abcd"));
+    /// ```
+    /// Note that [`Expr::any_of`] is just a convenient method for `Expr<char>`, a thin wrapper
+    /// around [`Expr::union`] and [`Expr::singleton`]. Here is the fully expanded version:
+    /// ```
+    /// # use rowantlr::ir::lexical::Expr;
+    /// assert_eq!(Expr::union([
+    ///     Expr::singleton('a'),
+    ///     Expr::union([
+    ///         Expr::singleton('b'),
+    ///         Expr::singleton('c'),
+    ///     ]),
+    ///     Expr::singleton('d'),
+    /// ]), Expr::union([
+    ///     Expr::singleton('a'),
+    ///     Expr::singleton('b'),
+    ///     Expr::singleton('c'),
+    ///     Expr::singleton('d'),
+    /// ]));
+    /// ```
     pub fn union(xs: impl IntoIterator<Item=Expr<A>>) -> Expr<A> {
         let mut has_epsilon = false;
         let mut result = Vec::new();
@@ -159,9 +194,47 @@ impl<A> Expr<A> {
                 }
             }
         }
-        Expr(Op::Union(result))
+        match result.len() {
+            1 => result.into_iter().next().unwrap(),
+            _ => Expr(Op::Union(result)),
+        }
     }
     /// Concatenation: `x₁ x₂ ... xₙ`.
+    ///
+    /// If input has only one item, no extra [`Op::Concat`] layer is introduced:
+    /// ```
+    /// # use rowantlr::ir::lexical::Expr;
+    /// let e = Expr::singleton('a');
+    /// assert_eq!(e.clone(), Expr::concat([e]));
+    /// ```
+    ///
+    /// Nested [`Op::Concat`] structures will be simplified:
+    /// ```
+    /// # use rowantlr::ir::lexical::Expr;
+    /// assert_eq!(Expr::concat([
+    ///     Expr::singleton('a'),
+    ///     Expr::from("bc"),
+    ///     Expr::singleton('d'),
+    /// ]), Expr::from("abcd"));
+    /// ```
+    /// Note that [`Expr::from`] is just a convenient method for `Expr<char>`, a thin wrapper
+    /// around [`Expr::concat`] and [`Expr::singleton`]. Here is the fully expanded version:
+    /// ```
+    /// # use rowantlr::ir::lexical::Expr;
+    /// assert_eq!(Expr::concat([
+    ///     Expr::singleton('a'),
+    ///     Expr::concat([
+    ///         Expr::singleton('b'),
+    ///         Expr::singleton('c'),
+    ///     ]),
+    ///     Expr::singleton('d'),
+    /// ]), Expr::concat([
+    ///     Expr::singleton('a'),
+    ///     Expr::singleton('b'),
+    ///     Expr::singleton('c'),
+    ///     Expr::singleton('d'),
+    /// ]));
+    /// ```
     pub fn concat(xs: impl IntoIterator<Item=Expr<A>>) -> Expr<A> {
         let mut result = Vec::new();
         for x in xs {
@@ -179,6 +252,7 @@ impl<A> Expr<A> {
     pub fn some(expr: Expr<A>) -> Expr<A> {
         Expr(match expr.0 {
             Op::Concat(xs) if xs.is_empty() => Op::Concat(xs), // ε+ = ε
+            Op::Union(xs) if xs.is_empty() => Op::Union(xs), // Ø+ = Ø
             x @ Op::Some(_) => x, // (x+)+ = x+
             x => Op::Some(Box::new(Expr(x))),
         })
@@ -292,14 +366,53 @@ impl BitAnd for ExprInfo {
 }
 
 impl BitAndAssign for ExprInfo {
-    fn bitand_assign(&mut self, rhs: Self) {
-        self.nullable = self.nullable && rhs.nullable;
+    fn bitand_assign(&mut self, mut rhs: Self) {
         if self.nullable {
             self.first_pos.extend(rhs.first_pos.iter().copied());
         }
+        std::mem::swap(&mut self.last_pos, &mut rhs.last_pos);
         if rhs.nullable {
             self.last_pos.extend(rhs.last_pos.iter().copied());
         }
+        self.nullable = self.nullable && rhs.nullable;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExprInfo;
+
+    fn input(nullable: bool, first_pos: impl IntoIterator<Item=usize>,
+             last_pos: impl IntoIterator<Item=usize>) -> ExprInfo {
+        ExprInfo {
+            nullable,
+            first_pos: first_pos.into_iter().collect(),
+            last_pos: last_pos.into_iter().collect(),
+        }
+    }
+
+    #[test]
+    fn test_bit_op_assign() {
+        let e1 = input(false, [0, 3], [42]);
+        let e1null = input(true, [0, 3], [42]);
+        let e2 = input(false, [6, 7], [100, 101]);
+        let e2null = input(true, [6, 7], [100, 101]);
+        fn prop(lhs: &ExprInfo, rhs: &ExprInfo) {
+            assert_eq!(lhs.clone() & rhs.clone(), {
+                let mut res = lhs.clone();
+                res &= rhs.clone();
+                res
+            });
+            assert_eq!(lhs.clone() | rhs.clone(), {
+                let mut res = lhs.clone();
+                res |= rhs.clone();
+                res
+            });
+        }
+        prop(&e1, &e2);
+        prop(&e1null, &e2);
+        prop(&e1, &e2null);
+        prop(&e1null, &e2null);
     }
 }
 
