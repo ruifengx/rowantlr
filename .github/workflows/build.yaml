@@ -65,18 +65,23 @@ jobs:
       with:
         toolchain: nightly
         override: true
-    - uses: actions-rs/cargo@v1
+        profile: minimal
+        components: llvm-tools-preview
+    - name: Install grcov
+      run: curl -L https://github.com/mozilla/grcov/releases/latest/download/grcov-linux-x86_64.tar.bz2 | tar -xj && mv grcov ~/.cargo/bin/
+    - name: Run tests
+      uses: actions-rs/cargo@v1
       with:
         command: test
         args: --all-features --no-fail-fast
       env:
-        CARGO_INCREMENTAL: '0'
-        RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-        RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-    - id: coverage
-      uses: actions-rs/grcov@v0.1
+        RUSTFLAGS: -Z instrument-coverage
+        RUSTDOCFLAGS: -Z instrument-coverage -Z unstable-options --persist-doctests target/debug/doctestbins
+        LLVM_PROFILE_FILE: coverage-%p-%m.profraw
+    - name: Run grcov
+      run: grcov . --binary-path target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore '../**' --ignore '/*' -o coverage.lcov
     - name: Coveralls Upload
       uses: coverallsapp/github-action@master
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        path-to-lcov: ${{ steps.coverage.outputs.report }}
+        path-to-lcov: coverage.lcov
