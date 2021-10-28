@@ -52,8 +52,8 @@
 //! let kernels = lalr1::build(&g, &first, &deduce_to_empty);
 //! # println!("{}", kernels.display_dot2tex(&["S'", "S", "L", "R"]));
 //! let table = lalr1::Table::try_from(&kernels).ok().unwrap();
-//! let input = ["*", "*", "id", "=", "id"];
-//! let parse = table.simulate_parse(input.iter()).unwrap();
+//! // correctly parse "* * id = id"
+//! let parse = table.simulate_parse(["*", "*", "id", "=", "id"]).unwrap();
 //! assert_eq!(
 //!     format!("{}", parse.pretty(&["S'", "S", "L", "R"])),
 //!     indoc::indoc! {r#"
@@ -71,6 +71,14 @@
 //!             NT#[ L ]
 //!               "id"
 //!     "#});
+//! // cannot parse "* * id id" (expecting "=" or EOF)
+//! let err = table.simulate_parse(["*", "*", "id", "id"]).unwrap_err();
+//! assert_eq!(err.unexpected, Lookahead::new("id"));
+//! assert_eq!(err.expecting, r#box![Lookahead::END_OF_INPUT, Lookahead::new("=")]);
+//! // cannot parse "* * id =" (expecting "id" or "*")
+//! let err = table.simulate_parse(["*", "*", "id", "="]).unwrap_err();
+//! assert_eq!(err.unexpected, Lookahead::END_OF_INPUT);
+//! assert_eq!(err.expecting, r#box![Lookahead::new("*"), Lookahead::new("id")]);
 //! ```
 //!
 //! To visualise the generated LALR automaton, run the following:
