@@ -76,7 +76,7 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: llvm-cov
-        args: --all-features --no-fail-fast --lcov --output-path coverage.lcov
+        args: --all-features --no-fail-fast --doctests --lcov --output-path coverage.lcov
     - name: Coveralls Upload
       uses: coverallsapp/github-action@master
       with:
