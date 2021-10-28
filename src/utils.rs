@@ -210,6 +210,17 @@ impl<A> RangeBounds<A> for SingularRange<A> {
     }
 }
 
+/// Types related to [`Dict`].
+pub mod dict {
+    use crate::utils::tuple::TupleRest;
+
+    /// Double-ended iterator
+    pub type Iter<'a, K, Q> = std::iter::Map<
+        std::slice::Iter<'a, K>,
+        fn(&'a K) -> <K as TupleRest<'a, Q>>::Rest
+    >;
+}
+
 impl<K> Dict<K> {
     fn locate<Q>(&self, key: &Q) -> Result<usize, usize>
         where Q: ?Sized, K: TupleCompare<Q> {
@@ -297,17 +308,16 @@ impl<K> Dict<K> {
     /// `min` (inclusive) to `max` (exclusive). The range may also be entered as
     /// `(Bound<T>, Bound<T>)`, so for example `range((Excluded(4), Included(10)))` will yield a
     /// left-exclusive, right-inclusive range from `4` to `10`.
-    pub fn range<Q, R>(&self, range: R) -> std::slice::Iter<K>
-        where Q: ?Sized, R: RangeBounds<Q>, K: TupleCompare<Q> {
+    pub fn range<'a, Q, R>(&'a self, range: R) -> dict::Iter<'a, K, Q>
+        where Q: ?Sized, R: RangeBounds<Q>, K: TupleCompare<Q>, K: TupleRest<'a, Q> {
         let (l, r) = self.indices_range(range);
-        self.0[l..r].iter()
+        self.0[l..r].iter().map(K::borrow_rest)
     }
 
     /// Constructs a double-ended iterator for some specific key in the dict.
-    pub fn equal_range<Q>(&self, q: Q) -> std::slice::Iter<K>
-        where K: TupleCompare<Q> {
-        let (l, r) = self.indices_range(SingularRange(q));
-        self.0[l..r].iter()
+    pub fn equal_range<'a, Q>(&'a self, q: Q) -> dict::Iter<'a, K, Q>
+        where K: TupleCompare<Q>, K: TupleRest<'a, Q> {
+        self.range(SingularRange(q))
     }
 }
 

@@ -93,7 +93,7 @@ use derivative::Derivative;
 use itertools::{Itertools, GroupBy};
 use crate::ir::syntax::{CaretExpr, Grammar, Symbol};
 use crate::backend::ll1::Lookahead;
-use crate::utils::{DisplayDot2TeX, simple::DisplayDot2TeX as DisplayDot2TeX_};
+use crate::utils::{Dict, DisplayDot2TeX, simple::DisplayDot2TeX as DisplayDot2TeX_};
 use std::convert::TryFrom;
 
 /// So-said "simple" types, with the tag types muted.
@@ -320,7 +320,7 @@ impl<'a, A, Tag> FrozenKernel<'a, A, Tag> {
 #[derive(Debug)]
 pub struct KernelSets<'a, A, Tag> {
     kernels: Box<[FrozenKernel<'a, A, Tag>]>,
-    goto_table: Box<[(usize, Symbol<A>, usize)]>,
+    goto_table: Dict<(usize, Symbol<A>, usize)>,
 }
 
 impl<'a, A, Tag> KernelSets<'a, A, Tag> {
@@ -332,7 +332,7 @@ impl<'a, A, Tag> KernelSets<'a, A, Tag> {
     }
     /// Calculate the `GOTO(from, sym)` set.
     pub fn goto(&self, from: usize, sym: &Symbol<A>) -> Option<usize> where A: Ord {
-        self.goto_table.binary_search_by_key(&(from, sym), |(i, x, _)| (*i, x)).ok()
+        self.goto_table.get((&from, sym)).copied()
     }
 }
 
@@ -443,8 +443,7 @@ pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'
     }
     let goto_table = goto_table.into_iter()
         .map(|((from, sym), to)| (idx_map[from], sym, idx_map[to]))
-        .sorted_unstable()
-        .collect::<Box<[_]>>();
+        .sorted_unstable().collect();
     KernelSets { kernels: kernels.into_boxed_slice(), goto_table }
 }
 
@@ -541,18 +540,19 @@ impl<A, R: TagResolver<A>> Tarjan<A, R> {
 /// This process is used calculate lookahead tokens for `KernelSets`.
 pub fn resolve_tags<'a, A, R>(sets: KernelSets<'a, A, usize>, resolver: &mut R) -> KernelSets<'a, A, R::Resolved>
     where R: TagResolver<A>, R::Resolved: Clone + Debug {
+    let KernelSets { kernels, goto_table } = sets;
     let tarjan = Tarjan::new(resolver.tag_count());
-    let resolved = tarjan.run(resolver, sets.kernels.iter()
+    let resolved = tarjan.run(resolver, kernels.iter()
         .flat_map(|k| k.0.iter())
         .map(|entry| entry.tag));
     KernelSets {
-        kernels: sets.kernels.into_vec().into_iter()
+        kernels: kernels.into_vec().into_iter()
             .map(|ker| FrozenKernel(
                 ker.0.into_vec().into_iter().map(|entry| Entry {
                     rule: entry.rule,
                     tag: resolved[entry.tag].as_ref().unwrap().clone(),
                 }).collect())).collect(),
-        goto_table: sets.goto_table,
+        goto_table,
     }
 }
 
@@ -736,9 +736,9 @@ pub enum Action {
 #[derive(Debug, Eq, PartialEq)]
 pub struct Table<A> {
     /// `ACTION` table: entries `(state, input, action)`.
-    pub action: Box<[(u32, Lookahead<A>, Action)]>,
+    pub action: Dict<(u32, Lookahead<A>, Action)>,
     /// `GOTO` table: entries `(state, non-terminal, state')`.
-    pub goto: Box<[(u32, u16, u32)]>,
+    pub goto: Dict<(u32, u16, u32)>,
 }
 
 /// Conflicts in LALR kernel sets.
@@ -818,10 +818,8 @@ impl<'a, A: Ord + Clone> TryFrom<&'a KernelSets<'a, A, Lookaheads<A>>> for Table
                         inserter.insert(x.clone(), act);
                     }
                 } else {
-                    let l = sets.goto_table.partition_point(|(n, _, _)| *n < k);
-                    let r = sets.goto_table.partition_point(|(n, _, _)| *n <= k);
-                    for (_, sym, t) in &sets.goto_table[l..r] {
-                        let t = *t as u32;
+                    for (sym, &t) in sets.goto_table.equal_range((&k, )) {
+                        let t = t as u32;
                         match sym {
                             Symbol::Terminal(a) => inserter.insert(Lookahead::new(a.clone()), Action::Shift(t)),
                             Symbol::NonTerminal(nt) => goto.push((k as u32, nt.get() as u16, t)),
@@ -834,8 +832,8 @@ impl<'a, A: Ord + Clone> TryFrom<&'a KernelSets<'a, A, Lookaheads<A>>> for Table
         }
         if !errs.is_empty() { Err(errs) } else {
             Ok(Table {
-                action: action.into_boxed_slice(),
-                goto: goto.into_boxed_slice(),
+                action: action.into(),
+                goto: goto.into(),
             })
         }
     }
@@ -913,34 +911,29 @@ pub mod simulation {
                        state_stack: Vec<u32>) -> ParseError<A> {
             ParseError {
                 unexpected,
-                expecting: {
-                    let current_state = *state_stack.last().unwrap();
-                    let l = self.action.partition_point(|(s, _, _)| *s < current_state);
-                    let r = self.action.partition_point(|(s, _, _)| *s <= current_state);
-                    self.action[l..r].iter()
-                        .map(|(_, a, _)| a.clone())
-                        .collect_vec()
-                        .into_boxed_slice()
-                },
+                expecting: self.action
+                    .equal_range((state_stack.last().unwrap(), ))
+                    .map(|(a, _)| a.clone())
+                    .collect_vec()
+                    .into_boxed_slice(),
                 parse_stack,
                 state_stack,
             }
         }
 
         /// Simulate LALR parsing on the given input.
-        pub fn simulate_parse<'a>(&self, input: impl Iterator<Item=&'a A>)
-                                  -> Result<Parse<A>, ParseError<A>> where A: 'a {
+        pub fn simulate_parse<I>(&self, input: I) -> Result<Parse<A>, ParseError<A>>
+            where I: IntoIterator<Item=A> {
             let mut state_stack = vec![0];
             let mut parse_stack = Vec::new();
-            let mut input = input.map(Lookahead::new)
+            let mut input = input.into_iter().map(Lookahead::new)
                 .chain(std::iter::once(Lookahead::END_OF_INPUT))
                 .peekable();
-            while let Some(tok) = input.peek().copied() {
+            while let Some(tok) = input.peek() {
                 let st = state_stack.last().copied().unwrap();
-                let act = match self.action.binary_search_by_key(
-                    &(st, tok), |(s, a, _)| (*s, a.as_ref())) {
-                    Ok(act) => self.action[act].2,
-                    Err(_) => return Err(self.parse_error(tok.cloned(), parse_stack, state_stack)),
+                let act = match self.action.get((&st, tok)).copied() {
+                    Some(act) => act,
+                    None => return Err(self.parse_error(input.next().unwrap(), parse_stack, state_stack)),
                 };
                 match act {
                     Action::Accept => {
@@ -948,10 +941,10 @@ pub mod simulation {
                         return Ok(parse_stack.into_iter().next().unwrap());
                     }
                     Action::Shift(s) => {
+                        let tok = input.next().unwrap();
                         let tok = tok.expect("cannot shift in END_OF_INPUT").to_owned();
                         parse_stack.push(Parse::Terminal(tok));
                         state_stack.push(s);
-                        let _ = input.next();
                     }
                     Action::Reduce { count, symbol } => {
                         let children = parse_stack
@@ -960,8 +953,7 @@ pub mod simulation {
                         parse_stack.push(Parse::NonTerminal { symbol, children });
                         state_stack.truncate(state_stack.len() - count as usize);
                         let s0 = *state_stack.last().unwrap();
-                        let (_, _, t) = self.goto[self.goto.binary_search_by_key(
-                            &(s0, symbol), |(s, sym, _)| (*s, *sym)).unwrap()];
+                        let t = *self.goto.get((&s0, &symbol)).unwrap();
                         state_stack.push(t);
                     }
                 }

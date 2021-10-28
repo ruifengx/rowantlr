@@ -84,6 +84,8 @@ impl<A> Lookahead<A> {
     pub fn as_ref(&self) -> Lookahead<&A> { Lookahead(self.0.as_ref()) }
     /// Converts from `&mut Lookahead<A>` to `Lookahead<&mut A>`.
     pub fn as_mut(&mut self) -> Lookahead<&mut A> { Lookahead(self.0.as_mut()) }
+    /// Maps the lookahead token.
+    pub fn map<B, F: FnOnce(A) -> B>(self, f: F) -> Lookahead<B> { Lookahead(self.0.map(f)) }
     /// Expect the lookahead not being `END_OF_INPUT`.
     pub fn expect(self, msg: &str) -> A { self.0.expect(msg) }
 }
