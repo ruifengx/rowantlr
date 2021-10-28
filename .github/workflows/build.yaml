@@ -71,18 +71,12 @@ jobs:
         profile: minimal
         components: llvm-tools-preview
     - name: Install grcov
-      run: curl -L https://github.com/mozilla/grcov/releases/latest/download/grcov-linux-x86_64.tar.bz2 | tar -xj && mv grcov ~/.cargo/bin/
-    - name: Run tests
+      run: curl -LsSf https://github.com/taiki-e/cargo-llvm-cov/releases/latest/download/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz | tar xzf - -C ~/.cargo/bin
+    - name: Generate coverage report
       uses: actions-rs/cargo@v1
       with:
-        command: test
-        args: --all-features --no-fail-fast
-      env:
-        RUSTFLAGS: -Z instrument-coverage
-        RUSTDOCFLAGS: -Z instrument-coverage -Z unstable-options --persist-doctests target/debug/doctestbins
-        LLVM_PROFILE_FILE: coverage-%p-%m.profraw
-    - name: Run grcov
-      run: grcov . --binary-path target/debug/ -s . -t lcov --branch --ignore-not-existing --ignore '../**' --ignore '/*' -o coverage.lcov
+        command: llvm-cov
+        args: --all-features --no-fail-fast --lcov --output-path coverage.lcov
     - name: Coveralls Upload
       uses: coverallsapp/github-action@master
       with:
