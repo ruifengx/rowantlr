@@ -531,14 +531,15 @@ pub struct Dfa<A> {
 
 /// DFA related data structures.
 pub mod dfa {
-    use std::borrow::Borrow;
-    use super::{Dfa, ExprInfo, ExprVisitor, PosInfo};
-
     use std::rc::Rc;
+    use std::borrow::Borrow;
     use std::collections::{BTreeSet, BTreeMap, VecDeque};
+
     use itertools::Itertools;
     use derivative::Derivative;
+
     use crate::utils::Dict;
+    use super::{Dfa, ExprInfo, ExprVisitor, PosInfo};
 
     /// Invalid input for some [`Dfa`].
     ///

@@ -451,7 +451,7 @@ pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'
     }
     let goto_table = goto_table.into_iter()
         .map(|((from, sym), to)| (idx_map[from], sym, idx_map[to]))
-        .sorted_unstable().collect();
+        .collect();
     KernelSets { kernels: kernels.into_boxed_slice(), goto_table }
 }
 

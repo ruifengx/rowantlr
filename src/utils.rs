@@ -178,6 +178,17 @@ impl<Env: ?Sized> DisplayDot2TeX<Env> for str {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use crate::utils::simple::DisplayDot2TeX;
+
+    #[test]
+    fn test_str_fmt_dot2tex() {
+        assert_eq!(&format!("{}", r#"Magic${Hash'}^#_\~&%"#.display_dot2tex_()),
+                   r#"Magic\$\{Hash'\}\char94 \#\_\backslash \textasciitilde \&\%"#);
+    }
+}
+
 /// More utility functions for iterators.
 pub trait IterHelper: Iterator {
     /// [`Iterator::map`] followed by [`Iterator::reduce`], with lifetime issues properly handled.
@@ -195,7 +206,80 @@ pub trait IterHelper: Iterator {
 
 impl<I: Iterator> IterHelper for I {}
 
-/// An immutable, flat dictionary.
+/// An immutable, compact, flat dictionary.
+///
+/// # Examples
+///
+/// `Dict`s can be created from arrays:
+/// ```
+/// # use rowantlr::utils::Dict;
+/// let solar_distance = Dict::from([
+///     ("Mercury",   5790_0000),
+///     ("Venus",   1_0820_0000),
+///     ("Earth",   1_4960_0000),
+///     ("Mars",    2_2790_0000),
+/// ]);
+/// ```
+/// from [`Vec`]s:
+/// ```
+/// # use rowantlr::utils::Dict;
+/// let solar_distance = Dict::from(vec![("Mercury", 5790_0000), /* ... */]);
+/// ```
+/// from boxed slices:
+/// ```
+/// # use rowantlr::r#box;
+/// # use rowantlr::utils::Dict;
+/// let solar_distance = Dict::from(r#box![("Mercury", 5790_0000), /* ... */]);
+/// ```
+/// or from iterators:
+/// ```
+/// # use rowantlr::utils::Dict;
+/// let solar_distance = [("Mercury", 5790_0000), /* ... */].into_iter().collect::<Dict<_>>();
+/// ```
+///
+/// Items of a `Dict` is always sorted. Use [`Dict::into_raw`] to obtain the back buffer:
+/// ```
+/// # use rowantlr::r#box;
+/// # use rowantlr::utils::Dict;
+/// # let solar_distance = Dict::from([
+/// #     ("Mercury",   5790_0000),
+/// #     ("Venus",   1_0820_0000),
+/// #     ("Earth",   1_4960_0000),
+/// #     ("Mars",    2_2790_0000),
+/// # ]);
+/// assert_eq!(solar_distance.into_raw(), r#box![
+///     ("Earth",   1_4960_0000),
+///     ("Mars",    2_2790_0000),
+///     ("Mercury",   5790_0000),
+///     ("Venus",   1_0820_0000),
+/// ]);
+/// ```
+///
+/// Information in `Dict`s can be accessed with [`Dict::get`], [`Dict::range`], etc. Thanks to the
+/// [`TupleCompare`] interface, any "prefix" of the record in the `Dict` can be used as indices.
+/// ```
+/// # use itertools::Itertools;
+/// # use rowantlr::utils::Dict;
+/// let goto_table = Dict::from([
+///     (0, 'a', 1),
+///     (0, 'b', 2),
+///     (1, 'a', 0),
+///     (2, 'b', 1),
+/// ]);
+/// // check for emptiness
+/// assert!(!goto_table.is_empty());
+/// // check for key existence
+/// assert!(goto_table.contains_key((&0, )));
+/// assert!(!goto_table.contains_key((&1, &'b')));
+/// // access the value of some specific key
+/// assert_eq!(goto_table.get((&1, )), Some((&'a', &0)));
+/// assert_eq!(goto_table.get((&0, &'a')), Some(&1));
+/// assert_eq!(goto_table.get((&1, &'b')), None);
+/// assert_eq!(goto_table.get_key_value((&1, )), Some(&(1, 'a', 0)));
+/// // obtain an iterator for values of a key range or some specific key
+/// assert_eq!(goto_table.range((&1, )..=(&2, )).collect_vec(), vec![(&'a', &0), (&'b', &1)]);
+/// assert_eq!(goto_table.equal_range((&0, )).collect_vec(), vec![(&'a', &1), (&'b', &2)]);
+/// ```
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Dict<K>(Box<[K]>);
 
@@ -214,7 +298,7 @@ impl<A> RangeBounds<A> for SingularRange<A> {
 pub mod dict {
     use crate::utils::tuple::TupleRest;
 
-    /// Double-ended iterator
+    /// Double-ended iterator into a [`Dict`](super::Dict).
     pub type Iter<'a, K, Q> = std::iter::Map<
         std::slice::Iter<'a, K>,
         fn(&'a K) -> <K as TupleRest<'a, Q>>::Rest
@@ -222,9 +306,9 @@ pub mod dict {
 }
 
 impl<K> Dict<K> {
-    fn locate<Q>(&self, key: &Q) -> Result<usize, usize>
-        where Q: ?Sized, K: TupleCompare<Q> {
-        self.0.binary_search_by(|a| a.tuple_compare(key))
+    fn locate<Q>(&self, key: Q) -> Result<usize, usize>
+        where K: TupleCompare<Q> {
+        self.0.binary_search_by(|a| a.tuple_compare(&key))
     }
 
     fn partition_point<F>(&self, pred: F) -> usize
@@ -254,37 +338,39 @@ impl<K> Dict<K> {
     pub fn as_slice(&self) -> &[K] { &self.0 }
 
     /// Returns `true` if the dict contains a value for the specified key.
-    pub fn contains_key<Q>(&self, key: &Q) -> bool
-        where Q: ?Sized, K: TupleCompare<Q> {
+    pub fn contains_key<Q>(&self, key: Q) -> bool
+        where K: TupleCompare<Q> {
         self.locate(key).is_ok()
     }
 
     /// Returns a reference to the value corresponding to the key.
+    /// If multiple values exist, an unspecified one is returned.
     pub fn get<'a, Q>(&'a self, key: Q) -> Option<K::Rest>
         where K: TupleCompare<Q>, K: TupleRest<'a, Q> {
-        let p = self.locate(&key).ok()?;
+        let p = self.locate(key).ok()?;
         Some(self.0[p].borrow_rest())
     }
 
     /// Returns the key-value pair corresponding to the supplied key.
-    pub fn get_key_value<Q>(&self, key: &Q) -> Option<&K>
+    /// If multiple entries exist, an unspecified one is returned.
+    pub fn get_key_value<Q>(&self, key: Q) -> Option<&K>
         where K: TupleCompare<Q> {
         let p = self.locate(key).ok()?;
         Some(&self.0[p])
     }
 
-    /// Creates a consuming iterator visiting all the entries, in sorted order. The map cannot be
+    /// Creates a consuming iterator visiting all the entries, in sorted order. The dict cannot be
     /// used after calling this. The iterator element type is `K`.
     pub fn into_raw(self) -> Box<[K]> { self.0 }
 
-    /// Creates a consuming iterator visiting all the keys, in sorted order. The map cannot be
+    /// Creates a consuming iterator visiting all the keys, in sorted order. The dict cannot be
     /// used after calling this. The iterator element type is `K`.
     pub fn into_keys<const N: usize>(self) -> impl Iterator<Item=K::Init>
         where K: TupleSplit<N> {
         self.0.into_vec().into_iter().map(K::tuple_split).map(|(k, _)| k)
     }
 
-    /// Creates a consuming iterator visiting all the values, in order by key. The map cannot be
+    /// Creates a consuming iterator visiting all the values, in order by key. The dict cannot be
     /// used after calling this. The iterator element type is `V`.
     pub fn into_values<const N: usize>(self) -> impl Iterator<Item=K::Tail>
         where K: TupleSplit<N> {
@@ -293,7 +379,7 @@ impl<K> Dict<K> {
 
     /// Returns `true` if the dict contains no elements.
     pub fn is_empty(&self) -> bool { self.0.is_empty() }
-    /// Gets an iterator over the entries of the map, sorted by key.
+    /// Gets an iterator over the entries of the dict, sorted by key.
     pub fn iter(&self) -> std::slice::Iter<K> { self.0.iter() }
 
     fn indices_range<Q, R>(&self, range: R) -> (usize, usize)
@@ -318,6 +404,12 @@ impl<K> Dict<K> {
     pub fn equal_range<'a, Q>(&'a self, q: Q) -> dict::Iter<'a, K, Q>
         where K: TupleCompare<Q>, K: TupleRest<'a, Q> {
         self.range(SingularRange(q))
+    }
+}
+
+impl<K: Ord, const N: usize> From<[K; N]> for Dict<K> {
+    fn from(buffer: [K; N]) -> Self {
+        Dict::from(Box::new(buffer) as Box<[K]>)
     }
 }
 
