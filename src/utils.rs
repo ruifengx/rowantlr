@@ -277,10 +277,15 @@ impl<I: Iterator> IterHelper for I {}
 /// assert_eq!(goto_table.get((&1, &'b')), None);
 /// assert_eq!(goto_table.get_key_value((&1, )), Some(&(1, 'a', 0)));
 /// // obtain an iterator for values of a key range or some specific key
+/// assert_eq!(goto_table.range((&1, )..(&2, )).collect_vec(), vec![(&'a', &0)]);
 /// assert_eq!(goto_table.range((&1, )..=(&2, )).collect_vec(), vec![(&'a', &0), (&'b', &1)]);
 /// assert_eq!(goto_table.equal_range((&0, )).collect_vec(), vec![(&'a', &1), (&'b', &2)]);
+/// // obtain an iterator for keys/values (key and value split at some index of the tuple)
+/// assert_eq!(goto_table.clone().into_keys::<2>().collect_vec(),
+///            vec![(0, 'a'), (0, 'b'), (1, 'a'), (2, 'b')]);
+/// assert_eq!(goto_table.clone().into_values::<2>().collect_vec(), vec![1, 2, 0, 1]);
 /// ```
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Dict<K>(Box<[K]>);
 
 struct SingularRange<A>(A);
