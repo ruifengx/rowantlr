@@ -19,6 +19,15 @@
 //! Tuple-related utilities.
 
 /// Get a shared reference for each element of a tuple.
+///
+/// # Examples
+///
+/// ```
+/// # use rowantlr::utils::tuple::{TupleBorrow, TupleCompare};
+/// let data: (String, Vec<&'static str>, usize) =
+///     ("answer".to_string(), vec!["life", "the universe", "everything"], 42);
+/// let borrowed: (&String, &Vec<&'static str>, &usize) = data.tuple_borrow();
+/// ```
 pub trait TupleBorrow<'a> {
     /// A tuple type shaped as `Self`, with each element replaced with its shared reference.
     type Borrowed;
@@ -61,6 +70,19 @@ invoke_macro! {
 ///
 /// Typically `Other` is a "prefix" of `Self` (modulo [`Borrow`](std::borrow::Borrow)), as is the
 /// case for `Self = (A, B, C)` and `Other = (X, Y)`, where `A: Borrow<X>` and `B: Borrow<Y>`.
+///
+/// # Examples
+///
+/// ```
+/// # use std::cmp::Ordering;
+/// # use rowantlr::utils::tuple::{TupleBorrow, TupleCompare};
+/// let data: (String, Vec<&'static str>, usize) =
+///     ("answer".to_string(), vec!["life", "the universe", "everything"], 42);
+/// assert_eq!(data.tuple_compare(&("answer", )), Ordering::Equal);
+/// assert_eq!(data.tuple_compare(&("question", )), Ordering::Less);
+/// assert_eq!(data.tuple_compare(&("answer", &["life"] as &[_])), Ordering::Greater);
+/// assert_eq!(data.tuple_compare(&data.tuple_borrow()), Ordering::Equal);
+/// ```
 pub trait TupleCompare<Other: ?Sized> {
     /// Compare two tuples.
     fn tuple_compare(&self, other: &Other) -> std::cmp::Ordering;
@@ -129,7 +151,7 @@ macro_rules! tuple_compare {
     (($n: expr) () () () ($($usR: ident),+) ($($tsR: ident),+) ($($idxR: tt),+)) => {};
     (($n: expr) ($($us: ident),+) ($($ts: ident),+) ($($idx: tt),+)
     ($($usR: ident),*) ($($tsR: ident),*) ($($idxR: tt),*)) => {
-        impl<'a, $($us, )+ $($usR, )* $($ts, )+> TupleCompare<($(&'a $ts, )+)>
+        impl<'a, $($us, )+ $($usR, )* $($ts: ?Sized, )+> TupleCompare<($(&'a $ts, )+)>
             for ($($us, )+ $($usR, )*)
             where $($us: ::std::borrow::Borrow<$ts>, )+
                   $($ts: ::std::cmp::Ord, )+ {
