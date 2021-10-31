@@ -966,7 +966,9 @@ pub mod simulation {
                     }
                 }
             }
-            Err(self.parse_error(Lookahead::END_OF_INPUT, parse_stack, state_stack))
+            // Lookahead::END_OF_INPUT is never removed from the input stream
+            // therefore it is impossible to exit the 'while' loop normally and reach here
+            unreachable!()
         }
     }
 }
