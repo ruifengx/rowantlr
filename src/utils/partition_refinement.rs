@@ -62,7 +62,26 @@ pub trait IndexManager<Element> {
     fn swap_index(&mut self, x: &Element, y: &Element);
 }
 
-/// A trivial [`IndexManager`]: `Element` is essentially `0..n`.
+/// A trivial [`IndexManager`] for bounded integral elements (essentially `0..n`).
+///
+/// ```
+/// # use rowantlr::utils::partition_refinement::{TrivialIdxMan, IndexManager};
+/// let mut p = TrivialIdxMan::from_slice(&[1usize, 2, 0]);
+/// assert_eq!(p.index_of(&1usize), 0);
+/// assert_eq!(p.index_of(&0usize), 2);
+/// p.swap_index(&1usize, &0usize);
+/// assert_eq!(p.index_of(&1usize), 2);
+/// assert_eq!(p.index_of(&0usize), 0);
+/// ```
+///
+/// The slice must consist exactly of `0..n` (in any order), or [`from_slice`] will panic:
+///
+/// ```should_panic
+/// # use rowantlr::utils::partition_refinement::{TrivialIdxMan, IndexManager};
+/// let _ = TrivialIdxMan::from_slice(&[1usize, 2, 3]); // panic
+/// ```
+///
+/// [`from_slice`]: TrivialIdxMan::from_slice
 pub struct TrivialIdxMan(Box<[usize]>);
 
 impl<E> IndexManager<E> for TrivialIdxMan
