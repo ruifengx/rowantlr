@@ -82,6 +82,7 @@ pub trait IndexManager<Element> {
 /// ```
 ///
 /// [`from_slice`]: TrivialIdxMan::from_slice
+#[derive(Debug, Eq, PartialEq)]
 pub struct TrivialIdxMan(Box<[usize]>);
 
 impl<E> IndexManager<E> for TrivialIdxMan
@@ -103,12 +104,47 @@ impl<E> IndexManager<E> for TrivialIdxMan
     }
 }
 
+/// A sub set of elements in partition refinement. Never invalidated after generation.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct Part {
+    start: usize,
+    end: usize,
+}
+
+impl Part {
+    fn new(start: usize, end: usize) -> Self {
+        debug_assert!(start <= end, "invalid range for Part");
+        Part { start, end }
+    }
+    fn len(self) -> usize { self.end - self.start }
+    fn as_range(self) -> Range<usize> { self.start..self.end }
+}
+
 /// Perform partition refinement on some elements.
-pub struct Partitions<E, P> {
+#[derive(Debug, Eq, PartialEq)]
+pub struct Partitions<E, P = TrivialIdxMan> {
     back_buffer: Vec<E>,
     parent_part: Vec<usize>,
-    partitions: Vec<Range<usize>>,
+    partitions: Vec<Part>,
     positions: P,
+}
+
+impl Partitions<usize, TrivialIdxMan> {
+    /// Initialise for partition refinement with the [`TrivialIdxMan`].
+    ///
+    /// Equivalent to [`Partitions::new`], but might help with type inference and/or efficiency.
+    /// ```
+    /// # use rowantlr::utils::partition_refinement::Partitions;
+    /// assert_eq!(Partitions::new_trivial(6), Partitions::<usize>::new((0..6).collect()));
+    /// ```
+    pub fn new_trivial(count: usize) -> Partitions<usize> {
+        Partitions {
+            back_buffer: (0..count).collect(),
+            parent_part: vec![0; count],
+            partitions: vec![Part::new(0, count)],
+            positions: TrivialIdxMan((0..count).collect()),
+        }
+    }
 }
 
 impl<E, P: IndexManager<E>> Partitions<E, P> {
@@ -116,7 +152,7 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
     pub fn new(elements: Vec<E>) -> Partitions<E, P> {
         Partitions {
             parent_part: vec![0; elements.len()],
-            partitions: vec![0..elements.len()],
+            partitions: vec![Part::new(0, elements.len())],
             positions: P::from_slice(&elements),
             back_buffer: elements,
         }
@@ -133,19 +169,20 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
 
     /// Get a slice for some partition.
     pub fn part(&self, n: usize) -> &[E] {
-        &self.back_buffer[self.partitions[n].clone()]
+        let Part { start, end } = self.partitions[n];
+        &self.back_buffer[start..end]
     }
 
     /// Get all the partitions.
     pub fn parts(&self) -> impl Iterator<Item=&[E]> + ExactSizeIterator {
-        self.partitions.iter().cloned().map(|rng| &self.back_buffer[rng])
+        self.partitions.iter().map(|rng| &self.back_buffer[rng.start..rng.end])
     }
 
     /// Refine with a set of (non-duplicated) elements typed `E`.
     ///
     /// Beware that if an element appears twice in `s`, the answer will be incorrect, the whole
     /// data structure may be corrupted, and the program may or may not panic.
-    pub fn refine_with<A, I>(&mut self, s: I) -> Vec<usize>
+    pub fn refine_with<A, I>(&mut self, s: I) -> impl Iterator<Item=Part> + '_
         where A: Borrow<E>, I: IntoIterator<Item=A> {
         let mut affected = BTreeMap::new();
         for x in s {
@@ -169,20 +206,20 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
             let new_a = self.partitions.len();
             let new_a_end = self.partitions[a].end;
             let new_a_begin = new_a_end - n_moved;
-            let new_a_rng = new_a_begin..new_a_end;
-            self.partitions.push(new_a_rng.clone());
+            let new_a_rng = Part::new(new_a_begin, new_a_end);
+            self.partitions.push(new_a_rng);
             // shrink the parent set 'a'
             self.partitions[a].end = new_a_begin;
             // record set pair '(a, new_a)' if a != {}
-            let a_rng = self.partitions[a].clone();
+            let a_rng = self.partitions[a];
             if a_rng.len() > new_a_rng.len() {
                 newly_formed.push(new_a);
             } else {
                 newly_formed.push(a);
             }
             // update parents for elements in 'new_a'
-            new_a_rng.for_each(|p| self.parent_part[p] = new_a);
+            new_a_rng.as_range().for_each(|p| self.parent_part[p] = new_a);
         }
-        newly_formed
+        newly_formed.into_iter().map(|n| self.partitions[n])
     }
 }
