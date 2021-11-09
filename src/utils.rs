@@ -21,7 +21,7 @@
 use std::iter::FromIterator;
 use std::fmt::{Display, Formatter};
 use std::ops::{Bound, RangeBounds};
-use crate::utils::tuple::{TupleCompare, TupleRest, TupleSplit};
+use tuple::{TupleBorrow, TupleCompare, TupleRest, TupleRotate, TupleSplit};
 
 pub mod tuple;
 pub mod partition_refinement;
@@ -261,6 +261,7 @@ impl<I: Iterator> IterHelper for I {}
 /// ```
 /// # use itertools::{assert_equal, Itertools};
 /// # use rowantlr::utils::Dict;
+/// # use rowantlr::utils::tuple::TupleBorrow;
 /// let goto_table = Dict::from([
 ///     (0, 'a', 1),
 ///     (0, 'b', 2),
@@ -284,6 +285,24 @@ impl<I: Iterator> IterHelper for I {}
 /// // obtain an iterator for keys/values (key and value split at some index of the tuple)
 /// assert_equal(goto_table.clone().into_keys::<2>(), [(0, 'a'), (0, 'b'), (1, 'a'), (2, 'b')]);
 /// assert_equal(goto_table.clone().into_values::<2>(), [1, 2, 0, 1]);
+/// // obtain an iterator for borrowed keys/values
+/// assert_equal(goto_table.keys::<2>(), [(&0, &'a'), (&0, &'b'), (&1, &'a'), (&2, &'b')]);
+/// assert_equal(goto_table.values::<2>(), [&1, &2, &0, &1]);
+/// // inverse the dict (swap roles between keys and values)
+/// let goto_inv = goto_table.inverse::<1>();
+/// assert_eq!(goto_inv, Dict::from([
+///     ('a', 0, 1),
+///     ('a', 1, 0),
+///     ('b', 1, 2),
+///     ('b', 2, 0),
+/// ]));
+/// // group the values by their respective keys (key and value split at some index of the tuple)
+/// let mut groups = goto_inv.groups::<1>();
+/// let groups_expected = [('a', [(0, 1), (1, 0)]), ('b', [(1, 2), (2, 0)])];
+/// for ((k0, g0), (k, g)) in groups.zip_eq(&groups_expected) {
+///     assert_eq!(k0, k);
+///     assert_equal(g0, g.iter().map(TupleBorrow::tuple_borrow));
+/// }
 /// ```
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Dict<K>(Box<[K]>);
@@ -301,13 +320,44 @@ impl<A> RangeBounds<A> for SingularRange<A> {
 
 /// Types related to [`Dict`].
 pub mod dict {
-    use crate::utils::tuple::TupleRest;
+    use crate::utils::tuple::{TupleBorrow, TupleRest, TupleSplit};
+
+    type MapTo<I, T> = std::iter::Map<I, fn(<I as Iterator>::Item) -> T>;
+
+    type Borrowed<'a, K> = <K as TupleBorrow<'a>>::Borrowed;
+    type Init<'a, K, const N: usize> = <Borrowed<'a, K> as TupleSplit<N>>::Init;
+    type Tail<'a, K, const N: usize> = <Borrowed<'a, K> as TupleSplit<N>>::Tail;
 
     /// Double-ended iterator into a [`Dict`](super::Dict).
-    pub type Iter<'a, K, Q> = std::iter::Map<
+    pub type Iter<'a, K, Q> = MapTo<
         std::slice::Iter<'a, K>,
-        fn(&'a K) -> <K as TupleRest<'a, Q>>::Rest
+        <K as TupleRest<'a, Q>>::Rest
     >;
+
+    /// Double-ended iterator for borrowed keys in a [`Dict`](super::Dict).
+    pub type Keys<'a, K, const N: usize> = MapTo<std::slice::Iter<'a, K>, Init<'a, K, N>>;
+
+    /// Double-ended iterator for borrowed values in a [`Dict`](super::Dict).
+    pub type Values<'a, K, const N: usize> = MapTo<std::slice::Iter<'a, K>, Tail<'a, K, N>>;
+
+    /// Double-ended iterator for borrowed values in a [`Dict`](super::Dict), grouped by their keys.
+    pub struct Groups<'a, K, const N: usize>(pub(super) &'a [K]);
+
+    impl<'a, K, const N: usize> Iterator for Groups<'a, K, N>
+        where K: TupleBorrow<'a>, K::Borrowed: TupleSplit<N>, Init<'a, K, N>: Eq {
+        type Item = (Init<'a, K, N>, Values<'a, K, N>);
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.0.is_empty() { return None; }
+            let (k0, _) = self.0[0].tuple_borrow().tuple_split();
+            let n = self.0.iter()
+                .map(|x| x.tuple_borrow().tuple_split().0)
+                .take_while(|k| *k == k0)
+                .count();
+            let (init, tail) = self.0.split_at(n);
+            self.0 = tail;
+            Some((k0, init.iter().map(|x| x.tuple_borrow().tuple_split().1)))
+        }
+    }
 }
 
 impl<K> Dict<K> {
@@ -316,26 +366,21 @@ impl<K> Dict<K> {
         self.0.binary_search_by(|a| a.tuple_compare(&key))
     }
 
-    fn partition_point<F>(&self, pred: F) -> usize
-        where F: FnMut(&K) -> bool {
-        self.0.partition_point(pred)
-    }
-
-    fn locate_lower_bound<Q>(&self, bound: Bound<&Q>) -> usize
+    fn locate_lower_bound<Q>(slice: &[K], bound: Bound<&Q>) -> usize
         where Q: ?Sized, K: TupleCompare<Q> {
         match bound {
-            Bound::Included(x) => self.partition_point(|k| k.tuple_compare(x).is_lt()),
-            Bound::Excluded(x) => self.partition_point(|k| k.tuple_compare(x).is_le()),
+            Bound::Included(x) => slice.partition_point(|k| k.tuple_compare(x).is_lt()),
+            Bound::Excluded(x) => slice.partition_point(|k| k.tuple_compare(x).is_le()),
             Bound::Unbounded => 0,
         }
     }
 
-    fn locate_upper_bound<Q>(&self, bound: Bound<&Q>) -> usize
+    fn locate_upper_bound<Q>(slice: &[K], bound: Bound<&Q>) -> usize
         where Q: ?Sized, K: TupleCompare<Q> {
         match bound {
-            Bound::Included(x) => self.partition_point(|k| k.tuple_compare(x).is_le()),
-            Bound::Excluded(x) => self.partition_point(|k| k.tuple_compare(x).is_lt()),
-            Bound::Unbounded => self.0.len(),
+            Bound::Included(x) => slice.partition_point(|k| k.tuple_compare(x).is_le()),
+            Bound::Excluded(x) => slice.partition_point(|k| k.tuple_compare(x).is_lt()),
+            Bound::Unbounded => slice.len(),
         }
     }
 
@@ -382,15 +427,33 @@ impl<K> Dict<K> {
         self.0.into_vec().into_iter().map(K::tuple_split).map(|(_, v)| v)
     }
 
+    /// Creates an inverse of this dict: keys become values, and values become keys.
+    pub fn inverse<const N: usize>(self) -> Dict<K::Rotated>
+        where K: TupleRotate<N>, K::Rotated: Ord {
+        self.0.into_vec().into_iter().map(K::tuple_rotate).collect()
+    }
+
     /// Returns `true` if the dict contains no elements.
     pub fn is_empty(&self) -> bool { self.0.is_empty() }
     /// Gets an iterator over the entries of the dict, sorted by key.
     pub fn iter(&self) -> std::slice::Iter<K> { self.0.iter() }
+    /// Gets an iterator over the keys of the dict, in sorted order.
+    pub fn keys<'a, const N: usize>(&'a self) -> dict::Keys<'a, K, N>
+        where K: TupleBorrow<'a>, K::Borrowed: TupleSplit<N> {
+        self.0.iter().map(|x| x.tuple_borrow().tuple_split().0)
+    }
+    /// Gets an iterator over the values of the dict, in order by key.
+    pub fn values<'a, const N: usize>(&'a self) -> dict::Values<'a, K, N>
+        where K: TupleBorrow<'a>, K::Borrowed: TupleSplit<N> {
+        self.0.iter().map(|x| x.tuple_borrow().tuple_split().1)
+    }
+    /// Gets an iterator over the values of the dict, grouped by key.
+    pub fn groups<const N: usize>(&self) -> dict::Groups<K, N> { dict::Groups(&self.0) }
 
     fn indices_range<Q, R>(&self, range: R) -> (usize, usize)
         where Q: ?Sized, K: TupleCompare<Q>, R: RangeBounds<Q> {
-        let l = self.locate_lower_bound(range.start_bound());
-        let r = self.locate_upper_bound(range.end_bound());
+        let l = Self::locate_lower_bound(&self.0, range.start_bound());
+        let r = Self::locate_upper_bound(&self.0, range.end_bound());
         (l, r)
     }
 
