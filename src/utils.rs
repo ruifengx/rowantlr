@@ -25,6 +25,7 @@ use tuple::{TupleBorrow, TupleCompare, TupleRest, TupleRotate, TupleSplit};
 
 pub mod tuple;
 pub mod partition_refinement;
+pub mod interval;
 
 /// Literals for boxed slices. Equivalent to `vec![...].into_boxed_slice()`.
 ///
