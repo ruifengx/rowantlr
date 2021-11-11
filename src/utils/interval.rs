@@ -22,7 +22,7 @@
 //! ```
 //! # use itertools::assert_equal;
 //! # use rowantlr::utils::interval::{Interval, Intervals};
-//! let mut set = Intervals::default();
+//! let mut set = Intervals::new();
 //! set.insert(17..21);
 //! set.insert(3..7);
 //! set.insert(23..32);
@@ -43,7 +43,7 @@
 //! ```
 //! # use itertools::assert_equal;
 //! # use rowantlr::utils::interval::{Interval, Intervals};
-//! # let mut set = Intervals::default();
+//! # let mut set = Intervals::new();
 //! # set.insert(3..7);
 //! # set.insert(17..21);
 //! # set.insert(23..32);
@@ -120,6 +120,9 @@ impl RangeBounds<usize> for Interval {
 pub struct Intervals(Vec<Interval>);
 
 impl Intervals {
+    /// Create a new interval set.
+    pub fn new() -> Self { Self::default() }
+
     /// Insert an interval and merge with other existing intervals.
     #[inline(always)]
     pub fn insert<I>(&mut self, interval: I)

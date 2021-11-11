@@ -34,23 +34,41 @@
 //! #     itertools::assert_equal(a, b)
 //! # }
 //! let mut partitions = Partitions::<usize, TrivialIdxMan>::new(vec![0, 1, 2, 3, 4, 5, 6]);
-//! partitions.refine_with([1, 3, 5]); {
+//! partitions.refine_with([1, 3, 5], &mut ()); {
 //!     assert_eq!(partitions.parts().len(), 2);
 //!     assert_equal(partitions.parts(), [&[0, 6, 2, 4], &[5, 3, 1]]);
 //! }
-//! partitions.refine_with([4, 5, 6]); {
+//! partitions.refine_with([4, 5, 6], &mut ()); {
 //!     assert_eq!(partitions.parts().len(), 4);
 //!     assert_equal(partitions.parts(), [&[0, 2], &[1, 3], &[6, 4], &[5]]);
 //! }
-//! partitions.refine_with([0, 2, 4]); {
+//! partitions.refine_with([0, 2, 4], &mut ()); {
 //!     assert_eq!(partitions.parts().len(), 5);
 //!     assert_equal(partitions.parts(), [&[2, 0], &[1, 3], &[6], &[5], &[4]]);
 //! }
 //! ```
+//!
+//! Use [`Intervals`] to collect all newly-generated parts during the refinement:
+//! ```
+//! # use itertools::assert_equal;
+//! # use rowantlr::utils::interval::Intervals;
+//! # use rowantlr::utils::partition_refinement::Partitions;
+//! let mut partitions = Partitions::new_trivial(7);
+//! let mut intervals = Intervals::new();
+//! partitions.refine_with([1, 3, 5], &mut intervals);
+//! assert_equal(&intervals, &[4..7]);
+//! partitions.refine_with([4, 5, 6], &mut intervals);
+//! assert_equal(&intervals, &[0..2, 4..7]);
+//! partitions.refine_with([0, 2, 4], &mut intervals);
+//! assert_equal(&intervals, &[0..3, 4..7]);
+//! ```
+//! Note that the intervals are only meaningful when interpreted together with the partitions.
+//! These intervals are only exposed for debug purposes.
 
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::ops::Range;
+use crate::utils::interval::{Interval, Intervals};
 
 /// Maintain the reverse mapping from elements in a [`slice`] to their indices.
 pub trait IndexManager<Element> {
@@ -118,6 +136,10 @@ impl Part {
     }
     fn len(self) -> usize { self.end - self.start }
     fn as_range(self) -> Range<usize> { self.start..self.end }
+    fn as_interval(self) -> Interval { self.as_range().into() }
+    pub(super) fn from_interval(interval: Interval) -> Self {
+        Part::new(interval.start, interval.end)
+    }
 }
 
 /// Perform partition refinement on some elements.
@@ -144,6 +166,32 @@ impl Partitions<usize, TrivialIdxMan> {
             partitions: vec![Part::new(0, count)],
             positions: TrivialIdxMan((0..count).collect()),
         }
+    }
+}
+
+/// [`Part`] managers controls the behaviour of [`Partitions::refine_with`] when new parts are
+/// generated during the refinement. For a "do-nothing" manager, use `()`.
+pub trait PartManager {
+    /// A summary of all new parts.
+    type Summary;
+    /// Generate the summary.
+    fn gen_summary(&mut self) -> Self::Summary;
+    /// New parts are always generated in pairs.
+    fn new_part_formed(&mut self, x: Part, y: Part);
+}
+
+impl PartManager for () {
+    type Summary = ();
+    fn gen_summary(&mut self) -> Self::Summary {}
+    fn new_part_formed(&mut self, _: Part, _: Part) {}
+}
+
+impl PartManager for Intervals {
+    type Summary = ();
+    fn gen_summary(&mut self) -> Self::Summary {}
+    fn new_part_formed(&mut self, x: Part, y: Part) {
+        let p = std::cmp::min_by_key(x, y, |p| p.len());
+        self.insert(p.as_interval());
     }
 }
 
@@ -182,8 +230,8 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
     ///
     /// Beware that if an element appears twice in `s`, the answer will be incorrect, the whole
     /// data structure may be corrupted, and the program may or may not panic.
-    pub fn refine_with<A, I>(&mut self, s: I) -> impl Iterator<Item=Part> + '_
-        where A: Borrow<E>, I: IntoIterator<Item=A> {
+    pub fn refine_with<A, I, M>(&mut self, s: I, manager: &mut M) -> M::Summary
+        where A: Borrow<E>, I: IntoIterator<Item=A>, M: PartManager {
         let mut affected = BTreeMap::new();
         for x in s {
             let x = x.borrow();
@@ -197,7 +245,6 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
             self.positions.swap_index(x, &self.back_buffer[last]);
             self.back_buffer.swap(pos, last);
         }
-        let mut newly_formed = Vec::new();
         for (a, n_moved) in affected {
             assert!(n_moved <= self.partitions[a].len());
             // all of the elements have been moved out from set 'a'
@@ -210,16 +257,12 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
             self.partitions.push(new_a_rng);
             // shrink the parent set 'a'
             self.partitions[a].end = new_a_begin;
-            // record set pair '(a, new_a)' if a != {}
+            // record set pair '(a, new_a)'
             let a_rng = self.partitions[a];
-            if a_rng.len() > new_a_rng.len() {
-                newly_formed.push(new_a);
-            } else {
-                newly_formed.push(a);
-            }
+            manager.new_part_formed(a_rng, new_a_rng);
             // update parents for elements in 'new_a'
             new_a_rng.as_range().for_each(|p| self.parent_part[p] = new_a);
         }
-        newly_formed.into_iter().map(|n| self.partitions[n])
+        manager.gen_summary()
     }
 }
