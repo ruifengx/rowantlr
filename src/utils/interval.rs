@@ -56,6 +56,7 @@
 
 use std::collections::Bound;
 use std::ops::{Range, RangeBounds, RangeInclusive, RangeTo, RangeToInclusive};
+use crate::utils::partition_refinement::{IndexManager, Part, Partitions};
 
 /// An interval. The invariant `start <= end` is always expected.
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -82,6 +83,9 @@ impl Interval {
         };
         Interval { start, end }
     }
+
+    /// Whether this interval is empty.
+    pub fn is_empty(self) -> bool { self.start == self.end }
 }
 
 macro_rules! interval_from_range {
@@ -153,10 +157,82 @@ impl Intervals {
 
     /// Pop the last interval from this set.
     pub fn pop(&mut self) -> Option<Interval> { self.0.pop() }
+
+    /// Pop a [`Part`] from this interval set. Only works if this interval set is used as the
+    /// [`PartManager`] for the input partition refinement structure.
+    ///
+    /// For a non-mutating method, refer to [`parts`](Intervals::parts).
+    pub fn pop_part<E, P>(&mut self, partitions: &Partitions<E, P>) -> Option<Part>
+        where P: IndexManager<E> {
+        let last = self.0.last_mut()?;
+        let part = partitions.split_interval(last);
+        if last.is_empty() { let _ = self.0.pop(); }
+        Some(Part::from_interval(part))
+    }
+
+    /// Iterator of intervals, each partitioned according to the partition refinement structure.
+    ///
+    /// This iterator should behave as if [`Part`]s are popped from this interval set with
+    /// [`pop_part`](Intervals::pop_part):
+    /// ```
+    /// # use itertools::assert_equal;
+    /// # use rowantlr::utils::interval::Intervals;
+    /// # use rowantlr::utils::partition_refinement::Partitions;
+    /// let mut intervals: Intervals;
+    /// let mut partitions: Partitions<usize>;
+    /// # intervals = Intervals::new();
+    /// # partitions = Partitions::new_trivial(7);
+    /// # partitions.refine_with([1, 3, 5], &mut intervals);
+    /// # partitions.refine_with([4, 5, 6], &mut intervals);
+    /// # partitions.refine_with([0, 2, 4], &mut intervals);
+    /// // 'intervals' and 'partitions' initialised
+    /// assert_equal(intervals.parts(&partitions), std::iter::from_fn({
+    ///     let mut intervals = intervals.clone();
+    ///     let partitions = &partitions;
+    ///     move || intervals.pop_part(partitions)
+    /// }));
+    /// ```
+    pub fn parts<'a, E, P>(&'a self, partitions: &'a Partitions<E, P>) -> PartIter<'a, E, P> {
+        PartIter {
+            intervals: &self.0,
+            partitions,
+            last_interval: Interval { start: 0, end: 0 },
+        }
+    }
 }
 
 impl<'a> IntoIterator for &'a Intervals {
     type Item = &'a Interval;
     type IntoIter = std::slice::Iter<'a, Interval>;
     fn into_iter(self) -> Self::IntoIter { self.iter() }
+}
+
+/// Iterator into an interval set, with the intervals partitioned according to the partition
+/// refinement structure. See also [`Intervals::parts`].
+#[derive(Clone)]
+pub struct PartIter<'a, E, P> {
+    partitions: &'a Partitions<E, P>,
+    intervals: &'a [Interval],
+    last_interval: Interval,
+}
+
+impl<'a, E, P: IndexManager<E>> Iterator for PartIter<'a, E, P> {
+    type Item = Part;
+    fn next(&mut self) -> Option<Part> {
+        if self.last_interval.is_empty() {
+            let (&last, rest) = self.intervals.split_last()?;
+            self.last_interval = last;
+            self.intervals = rest;
+        }
+        let res = self.partitions.split_interval(&mut self.last_interval);
+        Some(Part::from_interval(res))
+    }
+}
+
+impl<'a, E, P: IndexManager<E>> PartIter<'a, E, P> {
+    /// Map this iterator so that it returns slice `[E]` instead of [`Part`].
+    pub fn into_elements(self) -> impl Iterator<Item=&'a [E]> {
+        let partitions = self.partitions;
+        self.map(move |p| &partitions[p])
+    }
 }

@@ -55,19 +55,27 @@
 //! # use rowantlr::utils::partition_refinement::Partitions;
 //! let mut partitions = Partitions::new_trivial(7);
 //! let mut intervals = Intervals::new();
-//! partitions.refine_with([1, 3, 5], &mut intervals);
-//! assert_equal(&intervals, &[4..7]);
-//! partitions.refine_with([4, 5, 6], &mut intervals);
-//! assert_equal(&intervals, &[0..2, 4..7]);
-//! partitions.refine_with([0, 2, 4], &mut intervals);
-//! assert_equal(&intervals, &[0..3, 4..7]);
+//! partitions.refine_with([1, 3, 5], &mut intervals); { // 0 6 2 4 | 5 3 1
+//!     assert_equal(&intervals, &[4..7]);
+//!     assert_equal(intervals.parts(&partitions).into_elements(), [&[5, 3, 1]]);
+//! }
+//! partitions.refine_with([4, 5, 6], &mut intervals); { // 0 2 | 6 4 | 1 3 | 5
+//!     assert_equal(&intervals, &[0..2, 4..7]);
+//!     assert_equal(intervals.parts(&partitions).into_elements(),
+//!                  [&[1_usize, 3] as &[usize], &[5], &[0, 2]]);
+//! }
+//! partitions.refine_with([0, 2, 4], &mut intervals); { // 2 0 | 6 | 4 | 1 3 | 5
+//!     assert_equal(&intervals, &[0..3, 4..7]);
+//!     assert_equal(intervals.parts(&partitions).into_elements(),
+//!                  [&[1_usize, 3] as &[usize], &[5], &[2, 0], &[6]]);
+//! }
 //! ```
 //! Note that the intervals are only meaningful when interpreted together with the partitions.
 //! These intervals are only exposed for debug purposes.
 
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
-use std::ops::Range;
+use std::ops::{Index, Range};
 use crate::utils::interval::{Interval, Intervals};
 
 /// Maintain the reverse mapping from elements in a [`slice`] to their indices.
@@ -136,9 +144,8 @@ impl Part {
     }
     fn len(self) -> usize { self.end - self.start }
     fn as_range(self) -> Range<usize> { self.start..self.end }
-    fn as_interval(self) -> Interval { self.as_range().into() }
     pub(super) fn from_interval(interval: Interval) -> Self {
-        Part::new(interval.start, interval.end)
+        Self::new(interval.start, interval.end)
     }
 }
 
@@ -191,7 +198,7 @@ impl PartManager for Intervals {
     fn gen_summary(&mut self) -> Self::Summary {}
     fn new_part_formed(&mut self, x: Part, y: Part) {
         let p = std::cmp::min_by_key(x, y, |p| p.len());
-        self.insert(p.as_interval());
+        self.insert(p.as_range());
     }
 }
 
@@ -224,6 +231,13 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
     /// Get all the partitions.
     pub fn parts(&self) -> impl Iterator<Item=&[E]> + ExactSizeIterator {
         self.partitions.iter().map(|rng| &self.back_buffer[rng.start..rng.end])
+    }
+
+    pub(super) fn split_interval(&self, interval: &mut Interval) -> Interval {
+        let p = self.partitions[self.parent_part[interval.start]];
+        assert_eq!(p.start, interval.start, "the part should be starting from 'n'");
+        interval.start = p.end;
+        p.as_range().into()
     }
 
     /// Refine with a set of (non-duplicated) elements typed `E`.
@@ -264,5 +278,12 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
             new_a_rng.as_range().for_each(|p| self.parent_part[p] = new_a);
         }
         manager.gen_summary()
+    }
+}
+
+impl<E, P> Index<Part> for Partitions<E, P> {
+    type Output = [E];
+    fn index(&self, index: Part) -> &[E] {
+        &self.back_buffer[index.as_range()]
     }
 }
