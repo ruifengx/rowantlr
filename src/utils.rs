@@ -483,15 +483,16 @@ impl<K: Ord, const N: usize> From<[K; N]> for Dict<K> {
 }
 
 impl<K: Ord> From<Vec<K>> for Dict<K> {
-    fn from(buffer: Vec<K>) -> Self {
-        Dict::from(buffer.into_boxed_slice())
+    fn from(mut buffer: Vec<K>) -> Self {
+        buffer.sort_unstable();
+        buffer.dedup();
+        Dict(buffer.into_boxed_slice())
     }
 }
 
 impl<K: Ord> From<Box<[K]>> for Dict<K> {
-    fn from(mut buffer: Box<[K]>) -> Self {
-        buffer.sort_unstable();
-        Dict(buffer)
+    fn from(buffer: Box<[K]>) -> Self {
+        Dict::from(buffer.into_vec())
     }
 }
 

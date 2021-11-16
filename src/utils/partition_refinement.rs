@@ -233,9 +233,20 @@ impl<E, P: IndexManager<E>> Partitions<E, P> {
         self.partitions.iter().map(|rng| &self.back_buffer[rng.start..rng.end])
     }
 
+    /// Promote a part (determined by its index `n`) to index 0.
+    pub fn promote_to_head(&mut self, n: usize) {
+        if n == 0 { return; }
+        self.partitions.swap(0, n);
+        for p in [0, n] {
+            for parent in &mut self.parent_part[self.partitions[p].as_range()] {
+                *parent = p;
+            }
+        }
+    }
+
     pub(super) fn split_interval(&self, interval: &mut Interval) -> Interval {
         let p = self.partitions[self.parent_part[interval.start]];
-        assert_eq!(p.start, interval.start, "the part should be starting from 'n'");
+        assert_eq!(p.start, interval.start, "the part is not properly aligned");
         interval.start = p.end;
         p.as_range().into()
     }

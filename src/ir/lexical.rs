@@ -21,6 +21,7 @@
 //! - Use the [`Expr`] API to construct regular expressions;
 //! - Use [`Expr::build`], [`dfa::BuildResult::try_resolve`] to build DFAs;
 //! - Run a DFA on some input with [`Dfa::run`] and [`dfa::Resolved::run`];
+//! - Minimise a DFA with [`Dfa::minimise`];
 //!
 //! Below is an example:
 //!
@@ -35,15 +36,18 @@
 //!     Expr::singleton('b'),
 //! ]);
 //! let resolved = expr.build().try_resolve().unwrap();
-//! assert_eq!(Some(()), resolved.run("aab".chars()).unwrap());
-//! assert_eq!(Some(()), resolved.run("ab".chars()).unwrap());
-//! assert_eq!(Some(()), resolved.run("abab".chars()).unwrap());
-//! assert_eq!(None, resolved.run("aa".chars()).unwrap());
-//! let InvalidInput { current_state, current_input, remaining_input }
-//!     = resolved.run("baaa".chars()).unwrap_err();
-//! assert_eq!(current_state, 0);
-//! assert_eq!(current_input, 'b');
-//! assert_eq!(remaining_input.as_str(), "aaa");
+//! // the minimised DFA and the original should behave the same
+//! for m in [resolved.clone(), resolved.minimise()] {
+//!     assert_eq!(Some(()), m.run("aab".chars()).unwrap());
+//!     assert_eq!(Some(()), m.run("ab".chars()).unwrap());
+//!     assert_eq!(Some(()), m.run("abab".chars()).unwrap());
+//!     assert_eq!(None, m.run("aa".chars()).unwrap());
+//!     let InvalidInput { current_state, current_input, remaining_input }
+//!         = m.run("baaa".chars()).unwrap_err();
+//!     assert_eq!(current_state, 0);
+//!     assert_eq!(current_input, 'b');
+//!     assert_eq!(remaining_input.as_str(), "aaa");
+//! }
 //! ```
 //!
 //! Use [`Expr::build_many`] to build [`Dfa`] from multiple regular expressions, and use
@@ -99,13 +103,38 @@
 //! }
 //! // now we are ready to build the DFA.
 //! let resolved = result.try_resolve().expect("no more conflict expected");
-//! // the following two inputs have no conflict from the very beginning:
-//! assert_eq!(Some(0), resolved.run("abb".chars()).unwrap());
-//! assert_eq!(Some(1), resolved.run("bbaa".chars()).unwrap());
-//! // the hint we used to resolve the conflict behaves well:
-//! assert_eq!(Some(0), resolved.run("aabb".chars()).unwrap());
-//! // other conflicts are solved just as for the hint:
-//! assert_eq!(Some(0), resolved.run("abab".chars()).unwrap());
+//! // the minimised DFA and the original should behave the same
+//! for m in [resolved.clone(), resolved.minimise()] {
+//!     // the following two inputs have no conflict from the very beginning:
+//!     assert_eq!(Some(0), m.run("abb".chars()).unwrap());
+//!     assert_eq!(Some(1), m.run("bbaa".chars()).unwrap());
+//!     // the hint we used to resolve the conflict behaves well:
+//!     assert_eq!(Some(0), m.run("aabb".chars()).unwrap());
+//!     // other conflicts are solved just as for the hint:
+//!     assert_eq!(Some(0), m.run("abab".chars()).unwrap());
+//! }
+//! ```
+//!
+//! The above two example DFAs are actually minimal from the very beginning. Below is an example of
+//! how the DFA can have equivalent states and be properly minimised:
+//! ```
+//! use rowantlr::ir::lexical::{Expr, dfa::InvalidInput};
+//! let expr = Expr::union([
+//!     Expr::some(Expr::singleton('a')), // a+
+//!     Expr::some(Expr::from("aa")),     // (aa)+
+//! ]);
+//! let resolved = expr.build().try_resolve().unwrap();
+//! let minimised = resolved.clone().minimise();
+//! // the minimised DFA and the original should behave the same
+//! for m in [&resolved, &minimised] {
+//!     assert_eq!(Some(()), m.run("a".chars()).unwrap());
+//!     assert_eq!(Some(()), m.run("aa".chars()).unwrap());
+//!     assert_eq!(Some(()), m.run("aaa".chars()).unwrap());
+//!     assert_eq!(None, m.run("".chars()).unwrap());
+//! }
+//! assert!(minimised.dfa.state_count < resolved.dfa.state_count);
+//! assert_eq!(resolved.dfa.state_count, 3);
+//! assert_eq!(minimised.dfa.state_count, 2);
 //! ```
 
 use std::collections::BTreeSet;
@@ -521,7 +550,7 @@ impl<A: Clone> Expr<A> {
 }
 
 /// Definite Finite State Automata.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Dfa<A> {
     /// Number of states in this DFA.
     pub state_count: usize,
@@ -539,6 +568,8 @@ pub mod dfa {
     use derivative::Derivative;
 
     use crate::utils::Dict;
+    use crate::utils::interval::Intervals;
+    use crate::utils::partition_refinement::Partitions;
     use super::{Dfa, ExprInfo, ExprVisitor, PosInfo};
 
     /// Invalid input for some [`Dfa`].
@@ -754,7 +785,7 @@ pub mod dfa {
     }
 
     /// [`BuildResult`] with conflicts resolved.
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct Resolved<A, Tag> {
         /// The resulted DFA.
         pub dfa: Dfa<A>,
@@ -768,6 +799,44 @@ pub mod dfa {
             where A: 'a, C: 'a + Borrow<A>, I: IntoIterator<Item=C> {
             let s = self.dfa.run(0, input)?;
             Ok(self.tags.get((&s, )).map(Tag::clone))
+        }
+    }
+
+    impl<A: Clone + Ord, Tag: Clone + Ord> Resolved<A, Tag> {
+        /// Minimise the DFA using [Hopcroft's algorithm](https://en.wikipedia.org/wiki/DFA_minimization).
+        pub fn minimise(self) -> Self {
+            let accepts = self.tags.clone().inverse::<1>();
+            let reverse_trans = self.dfa.transitions.iter()
+                .map(|(s, a, t)| (*t, a.clone(), *s))
+                .collect::<Dict<_>>();
+            let mut partitions = Partitions::new_trivial(self.dfa.state_count);
+            let mut pending = Intervals::new();
+            for (_, g) in accepts.groups::<1>() {
+                partitions.refine_with(g, &mut pending);
+            }
+            while let Some(p) = pending.pop_part(&partitions) {
+                for (_, g) in partitions[p].iter()
+                    .flat_map(|t| reverse_trans.equal_range((t, )))
+                    .map(|(a, s)| (a.clone(), *s))
+                    .collect::<Dict<_>>()
+                    .groups::<1>() {
+                    partitions.refine_with(g, &mut pending);
+                }
+            }
+            partitions.promote_to_head(partitions.parent_part_of(&0));
+            let mut transitions = self.dfa.transitions.into_raw();
+            for (s, _, t) in transitions.iter_mut() {
+                *s = partitions.parent_part_of(s);
+                *t = partitions.parent_part_of(t);
+            }
+            let transitions = Dict::from(transitions);
+            let dfa = Dfa { state_count: partitions.parts().len(), transitions };
+            let mut tags = self.tags.into_raw();
+            for (s, _) in tags.iter_mut() {
+                *s = partitions.parent_part_of(s);
+            }
+            let tags = Dict::from(tags);
+            Resolved { dfa, tags }
         }
     }
 
