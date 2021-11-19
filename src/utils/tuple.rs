@@ -24,9 +24,9 @@
 ///
 /// ```
 /// # use rowantlr::utils::tuple::{TupleBorrow, TupleCompare};
-/// let data: (String, Vec<&'static str>, usize) =
+/// let data: (String, Vec<&'static str>, u64) =
 ///     ("answer".to_string(), vec!["life", "the universe", "everything"], 42);
-/// let borrowed: (&String, &Vec<&'static str>, &usize) = data.tuple_borrow();
+/// let borrowed: (&String, &Vec<&'static str>, &u64) = data.tuple_borrow();
 /// ```
 pub trait TupleBorrow<'a> {
     /// A tuple type shaped as `Self`, with each element replaced with its shared reference.
@@ -76,7 +76,7 @@ invoke_macro! {
 /// ```
 /// # use std::cmp::Ordering;
 /// # use rowantlr::utils::tuple::{TupleBorrow, TupleCompare};
-/// let data: (String, Vec<&'static str>, usize) =
+/// let data: (String, Vec<&'static str>, u64) =
 ///     ("answer".to_string(), vec!["life", "the universe", "everything"], 42);
 /// assert_eq!(data.tuple_compare(&("answer", )), Ordering::Equal);
 /// assert_eq!(data.tuple_compare(&("question", )), Ordering::Less);

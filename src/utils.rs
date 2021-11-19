@@ -362,6 +362,9 @@ pub mod dict {
 }
 
 impl<K> Dict<K> {
+    /// Get the size of this dict.
+    pub fn len(&self) -> usize { self.0.len() }
+
     fn locate<Q>(&self, key: Q) -> Result<usize, usize>
         where K: TupleCompare<Q> {
         self.0.binary_search_by(|a| a.tuple_compare(&key))
