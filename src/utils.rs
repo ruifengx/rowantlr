@@ -18,14 +18,11 @@
 
 //! Common utilities.
 
+use std::any::type_name;
 use std::iter::FromIterator;
 use std::fmt::{Display, Formatter};
 use std::ops::{Bound, RangeBounds};
 use tuple::{TupleBorrow, TupleCompare, TupleRest, TupleRotate, TupleSplit};
-
-pub mod tuple;
-pub mod partition_refinement;
-pub mod interval;
 
 /// Literals for boxed slices. Equivalent to `vec![...].into_boxed_slice()`.
 ///
@@ -43,6 +40,53 @@ macro_rules! r#box {
     ($e: expr; $n: expr) => {
         ::std::vec![$e; $n].into_boxed_slice()
     }
+}
+
+// Generally we do not expect anything to overflow `usize`, because we are usually on 64bit
+// platforms, and `u128` is not going to appear very often. Under such circumstances, the check
+// should be completely optimised away by the compiler.
+//
+// That said, signed integers may actually underflow `usize`.
+macro_rules! idx {
+    ($i: expr) => {{
+        let __idx: usize = TryInto::try_into($i)
+            .expect("using this integer as index under/overflows `usize`");
+        __idx
+    }}
+}
+
+macro_rules! narrow {
+    ($n: expr => $t: ty) => {{
+        let __narrow_input: usize = $n;
+        match TryInto::<$t>::try_into(__narrow_input) {
+            Ok(__narrow_result) => __narrow_result,
+            Err(__narrow_error) => crate::utils::narrow_failed(
+                stringify!($n), __narrow_input, __narrow_error,
+            ),
+        }
+    }};
+    ($n: expr) => {
+        narrow!($n => _)
+    }
+}
+
+pub mod tuple;
+pub mod partition_refinement;
+pub mod interval;
+
+#[cold]
+#[inline(never)]
+#[track_caller]
+pub(crate) fn narrow_failed<E: Display, T>(expr_text: &str, value: usize, error: E) -> T {
+    narrow_failed_impl(expr_text, value, error, type_name::<T>())
+}
+
+#[inline(always)]
+#[track_caller]
+pub(crate) fn narrow_failed_impl<E: Display>(
+    expr_text: &str, value: usize,
+    error: E, target_type: &str) -> ! {
+    panic!("narrowing '{}' (= {}) to {} failed: {}", expr_text, value, target_type, error)
 }
 
 /// Compare references as if they were raw pointers.

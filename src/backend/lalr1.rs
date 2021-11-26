@@ -131,7 +131,7 @@ pub mod simple {
 
 /// Non-terminal symbols, represented as their index in the [`Grammar`], including the internal
 /// start symbol `S` (indexed 0).
-pub type NonTerminal = usize;
+pub type NonTerminal = u16;
 
 /// A production rule used in a state set.
 #[derive(Debug)]
@@ -184,7 +184,8 @@ impl<'a, A: DisplayDot2TeX, Tag: DisplayDot2TeX> DisplayDot2TeX for Entry<'a, A,
 impl<'a, A, Tag, T> DisplayDot2TeX<[T]> for Entry<'a, A, Tag>
     where A: DisplayDot2TeX<[T]>, Tag: DisplayDot2TeX<[T]>, T: AsRef<str> {
     fn fmt_dot2tex(&self, dict: &'_ [T], f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, r#"        \(\NT{{{}}} \to"#, dict[self.rule.symbol].as_ref().display_dot2tex_())?;
+        write!(f, r#"        \(\NT{{{}}} \to"#,
+               dict[idx!(self.rule.symbol)].as_ref().display_dot2tex_())?;
         self.rule.rhs.fmt_dot2tex(dict, f)?;
         writeln!(f, r#"\), & \({}\) \cr"#, self.tag.display_dot2tex(dict))
     }
@@ -328,18 +329,19 @@ impl<'a, A, Tag> FrozenKernel<'a, A, Tag> {
 #[derive(Debug)]
 pub struct KernelSets<'a, A, Tag> {
     kernels: Box<[FrozenKernel<'a, A, Tag>]>,
-    goto_table: Dict<(usize, Symbol<A>, usize)>,
+    goto_table: Dict<(u32, Symbol<A>, u32)>,
 }
 
 impl<'a, A, Tag> KernelSets<'a, A, Tag> {
     /// Get the (ascending) list of frozen kernel sets.
     pub fn kernels(&self) -> &[FrozenKernel<'a, A, Tag>] { &self.kernels }
     /// Get index of a (non-frozen) kernel sets.
-    pub fn index_of(&self, i: &Kernel<A, Tag>) -> Option<usize> {
-        self.kernels.binary_search_by(|k| k.compare(i)).ok()
+    pub fn index_of(&self, i: &Kernel<A, Tag>) -> Option<u32> {
+        self.kernels.binary_search_by(|k| k.compare(i))
+            .ok().map(|x| narrow!(x))
     }
     /// Calculate the `GOTO(from, sym)` set.
-    pub fn goto(&self, from: usize, sym: &Symbol<A>) -> Option<usize> where A: Ord {
+    pub fn goto(&self, from: u32, sym: &Symbol<A>) -> Option<u32> where A: Ord {
         self.goto_table.get((&from, sym)).copied()
     }
 }
@@ -416,9 +418,9 @@ pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'
         .map(|rhs| Entry { rule: Rule { symbol: 0, rhs }, tag: root_tag.clone() })
         .collect::<Kernel<A, M::Tag>>(), mgr));
     let mut kernels_map = BTreeMap::new();
-    kernels_map.insert(start.clone(), 0usize);
+    kernels_map.insert(start.clone(), 0_u32);
     let mut queue = VecDeque::new();
-    queue.push_back((0usize, start));
+    queue.push_back((0_u32, start));
     let mut goto_table = BTreeMap::new();
     while let Some((idx, i)) = queue.pop_front() {
         for (sym, states) in all_goto_sets(&i).get() {
@@ -427,7 +429,7 @@ pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'
                 rule: entry.rule,
             }).collect::<Kernel<A, M::Tag>>(), mgr));
             use std::collections::btree_map::Entry::*;
-            let k = kernels_map.len();
+            let k = narrow!(kernels_map.len());
             let k = match kernels_map.entry(states.clone()) {
                 Vacant(to_insert) => {
                     queue.push_back((k, states.clone()));
@@ -444,13 +446,13 @@ pub fn all_kernel_sets<'a, A, M>(g: &'a Grammar<A>, mgr: &mut M) -> KernelSets<'
         }
     }
     let mut kernels = Vec::with_capacity(kernels_map.len());
-    let mut idx_map = vec![0usize; kernels_map.len()];
-    for (new_idx, (kernel, old_idx)) in kernels_map.into_iter().enumerate() {
-        idx_map[old_idx] = new_idx;
+    let mut idx_map = vec![0_u32; kernels_map.len()];
+    for (new_idx, (kernel, old_idx)) in (0..).zip(kernels_map.into_iter()) {
+        idx_map[idx!(old_idx)] = new_idx;
         kernels.push(FrozenKernel::freeze(Rc::try_unwrap(kernel).ok().unwrap()));
     }
     let goto_table = goto_table.into_iter()
-        .map(|((from, sym), to)| (idx_map[from], sym, idx_map[to]))
+        .map(|((from, sym), to)| (idx_map[idx!(from)], sym, idx_map[idx!(to)]))
         .collect();
     KernelSets { kernels: kernels.into_boxed_slice(), goto_table }
 }
@@ -460,12 +462,12 @@ pub trait TagResolver<A> {
     /// After resolving a tag, we get a `Resolved` to be stored back into that [`Entry`].
     type Resolved: Clone;
     /// Total number of tags.
-    fn tag_count(&self) -> usize;
+    fn tag_count(&self) -> u32;
     /// Get the tags which should be resolved prior to the current one.
-    fn get_predecessors(&self, tag: usize) -> Vec<usize>;
+    fn get_predecessors(&self, tag: u32) -> Vec<u32>;
     /// After the dependencies have been worked out, resolve a group of `Tag`s where their
     /// dependency graph is strongly connected (contains a loop).
-    fn resolve_group(&mut self, tags: impl Iterator<Item=usize>,
+    fn resolve_group(&mut self, tags: impl Iterator<Item=u32>,
                      predecessors: impl Iterator<Item=Self::Resolved>) -> Self::Resolved;
 }
 
@@ -476,8 +478,8 @@ pub trait TagResolver<A> {
 #[derivative(PartialOrd(bound = "R::Resolved: PartialOrd"), Ord(bound = "R::Resolved: Ord"))]
 #[derivative(Clone(bound = "R::Resolved: Clone"), Copy(bound = "R::Resolved: Copy"))]
 struct VertexInfo<A, R: TagResolver<A>> {
-    visit_time: usize,
-    earliest_reachable: usize,
+    visit_time: u32,
+    earliest_reachable: u32,
     visited: bool,
     in_current_path: bool,
     resolved: Option<R::Resolved>,
@@ -485,8 +487,8 @@ struct VertexInfo<A, R: TagResolver<A>> {
 
 struct Tarjan<A, R: TagResolver<A>> {
     vertices: Vec<VertexInfo<A, R>>,
-    current_path: Vec<usize>,
-    current_time: usize,
+    current_path: Vec<u32>,
+    current_time: u32,
 }
 
 impl<A, R: TagResolver<A>> Tarjan<A, R> {
@@ -498,58 +500,58 @@ impl<A, R: TagResolver<A>> Tarjan<A, R> {
         }
     }
 
-    fn run(mut self, resolver: &mut R, tags: impl Iterator<Item=usize>) -> Box<[Option<R::Resolved>]> {
+    fn run(mut self, resolver: &mut R, tags: impl Iterator<Item=u32>) -> Box<[Option<R::Resolved>]> {
         for tag in tags {
-            if !self.vertices[tag].visited {
+            if !self.vertices[idx!(tag)].visited {
                 self.visit(resolver, tag);
             }
         }
         self.vertices.into_iter().map(|info| info.resolved).collect()
     }
 
-    fn visit(&mut self, resolver: &mut R, this: usize) {
+    fn visit(&mut self, resolver: &mut R, this: u32) {
         let k = self.current_path.len();
-        self.vertices[this].visited = true;
-        self.vertices[this].in_current_path = true;
-        self.vertices[this].visit_time = self.current_time;
-        self.vertices[this].earliest_reachable = self.current_time;
+        self.vertices[idx!(this)].visited = true;
+        self.vertices[idx!(this)].in_current_path = true;
+        self.vertices[idx!(this)].visit_time = self.current_time;
+        self.vertices[idx!(this)].earliest_reachable = self.current_time;
         self.current_time += 1;
         self.current_path.push(this);
 
         for that in resolver.get_predecessors(this) {
-            if !self.vertices[that].visited {
+            if !self.vertices[idx!(that)].visited {
                 self.visit(resolver, that);
-                self.vertices[this].earliest_reachable = std::cmp::min(
-                    self.vertices[this].earliest_reachable,
-                    self.vertices[that].earliest_reachable);
-            } else if self.vertices[that].in_current_path {
-                self.vertices[this].earliest_reachable = std::cmp::min(
-                    self.vertices[this].earliest_reachable,
-                    self.vertices[that].visit_time);
+                self.vertices[idx!(this)].earliest_reachable = std::cmp::min(
+                    self.vertices[idx!(this)].earliest_reachable,
+                    self.vertices[idx!(that)].earliest_reachable);
+            } else if self.vertices[idx!(that)].in_current_path {
+                self.vertices[idx!(this)].earliest_reachable = std::cmp::min(
+                    self.vertices[idx!(this)].earliest_reachable,
+                    self.vertices[idx!(that)].visit_time);
             }
         }
 
-        if self.vertices[this].visit_time == self.vertices[this].earliest_reachable {
+        if self.vertices[idx!(this)].visit_time == self.vertices[idx!(this)].earliest_reachable {
             let group = self.current_path.split_off(k);
             let ps = resolver.get_predecessors(this)
-                .into_iter().filter_map(|p| self.vertices[p].resolved.as_ref()).cloned();
+                .into_iter().filter_map(|p| self.vertices[idx!(p)].resolved.as_ref()).cloned();
             let r = resolver.resolve_group(group.iter().copied(), ps);
             for t in group {
-                self.vertices[t].resolved = Some(r.clone());
+                self.vertices[idx!(t)].resolved = Some(r.clone());
             }
         }
 
-        self.vertices[this].in_current_path = false;
+        self.vertices[idx!(this)].in_current_path = false;
     }
 }
 
 /// Resolve the tags with a [`TagResolver`] in case their is inter-dependencies among them.
 ///
 /// This process is used calculate lookahead tokens for `KernelSets`.
-pub fn resolve_tags<'a, A, R>(sets: KernelSets<'a, A, usize>, resolver: &mut R) -> KernelSets<'a, A, R::Resolved>
+pub fn resolve_tags<'a, A, R>(sets: KernelSets<'a, A, u32>, resolver: &mut R) -> KernelSets<'a, A, R::Resolved>
     where R: TagResolver<A>, R::Resolved: Clone + Debug {
     let KernelSets { kernels, goto_table } = sets;
-    let tarjan = Tarjan::new(resolver.tag_count());
+    let tarjan = Tarjan::new(idx!(resolver.tag_count()));
     let resolved = tarjan.run(resolver, kernels.iter()
         .flat_map(|k| k.0.iter())
         .map(|entry| entry.tag));
@@ -558,7 +560,7 @@ pub fn resolve_tags<'a, A, R>(sets: KernelSets<'a, A, usize>, resolver: &mut R) 
             .map(|ker| FrozenKernel(
                 ker.0.into_vec().into_iter().map(|entry| Entry {
                     rule: entry.rule,
-                    tag: resolved[entry.tag].as_ref().unwrap().clone(),
+                    tag: resolved[idx!(entry.tag)].as_ref().unwrap().clone(),
                 }).collect())).collect(),
         goto_table,
     }
@@ -569,7 +571,7 @@ pub fn resolve_tags<'a, A, R>(sets: KernelSets<'a, A, usize>, resolver: &mut R) 
 #[derivative(Default(bound = "A: Ord"))]
 struct LookaheadsWithDep<A> {
     spontaneous: BTreeSet<Lookahead<A>>,
-    depends_on: BTreeSet<usize>,
+    depends_on: BTreeSet<u32>,
 }
 
 struct LookaheadManager<'a, A> {
@@ -594,10 +596,10 @@ impl<'a, A> LookaheadManager<'a, A> {
 }
 
 impl<'a, A: Ord + Clone> TagManager<A> for LookaheadManager<'a, A> {
-    type Tag = usize;
+    type Tag = u32;
 
     fn generate_tag(&mut self, upcoming: &[Symbol<A>], parent_tag: &Self::Tag) -> Self::Tag {
-        let this = self.tags.len();
+        let this = narrow!(self.tags.len());
         self.tags.push(LookaheadsWithDep::default());
         self.update_tag(upcoming, parent_tag, &this);
         this
@@ -606,20 +608,20 @@ impl<'a, A: Ord + Clone> TagManager<A> for LookaheadManager<'a, A> {
     fn update_tag(&mut self, upcoming: &[Symbol<A>], parent_tag: &Self::Tag, previous: &Self::Tag) {
         if super::ll1::append_first_of::<_, _, _, _, [A]>(
             upcoming, self.first, self.deduce_to_empty,
-            &mut self.tags[*previous].spontaneous, &mut false) {
-            self.tags[*previous].depends_on.insert(*parent_tag);
+            &mut self.tags[idx!(*previous)].spontaneous, &mut false) {
+            self.tags[idx!(*previous)].depends_on.insert(*parent_tag);
         }
     }
 
     fn merge_tags<'t>(&mut self, tags: impl Iterator<Item=(&'t Self::Tag, &'t Self::Tag)>) {
         let mut tags = tags.map(|(&t, &s)| (t, s)).collect_vec();
         tags.sort_unstable_by_key(|&(_, s)| s);
-        let map_idx = |x: usize| tags
+        let map_idx = |x: u32| tags
             .binary_search_by_key(&x, |&(_, s)| s)
             .map_or(x, |pos| tags[pos].0);
 
-        let mut min = usize::MAX;
-        let mut max = usize::MIN;
+        let mut min = u32::MAX;
+        let mut max = u32::MIN;
         let mut count = 0;
         for &(target, source) in &tags {
             min = std::cmp::min(min, source);
@@ -627,21 +629,21 @@ impl<'a, A: Ord + Clone> TagManager<A> for LookaheadManager<'a, A> {
             count += 1;
 
             assert_ne!(target, source);
-            let spontaneous = self.tags[source].spontaneous.iter().cloned().collect_vec();
-            self.tags[target].spontaneous.extend(spontaneous.into_iter());
-            let depends_on = self.tags[source].depends_on.iter().copied().collect_vec();
-            self.tags[target].depends_on.extend(depends_on.into_iter().map(map_idx));
+            let spontaneous = self.tags[idx!(source)].spontaneous.iter().cloned().collect_vec();
+            self.tags[idx!(target)].spontaneous.extend(spontaneous.into_iter());
+            let depends_on = self.tags[idx!(source)].depends_on.iter().copied().collect_vec();
+            self.tags[idx!(target)].depends_on.extend(depends_on.into_iter().map(map_idx));
         }
 
         if max < min { return; }
         // INVARIANT: we are removing the last `count` values.
         assert_eq!(count, max - min + 1);
-        assert_eq!(max, self.tags.len() - 1);
-        self.tags.truncate(min);
+        assert_eq!(idx!(max), self.tags.len() - 1);
+        self.tags.truncate(idx!(min));
     }
 
     fn root_tag(&mut self) -> Self::Tag {
-        let this = self.tags.len();
+        let this = narrow!(self.tags.len());
         let mut tag = LookaheadsWithDep::default();
         tag.spontaneous.insert(Lookahead::END_OF_INPUT);
         self.tags.push(tag);
@@ -651,7 +653,7 @@ impl<'a, A: Ord + Clone> TagManager<A> for LookaheadManager<'a, A> {
 
 struct LookaheadResolver<A> {
     tags: Vec<LookaheadsWithDep<A>>,
-    index_map: Box<[usize]>,
+    index_map: Box<[u32]>,
     resolved: Vec<Rc<[Lookahead<A>]>>,
 }
 
@@ -674,26 +676,26 @@ impl<A: DisplayDot2TeX<Env>, Env: ?Sized> DisplayDot2TeX<Env> for Lookaheads<A> 
 impl<A: Ord + Clone> TagResolver<A> for LookaheadResolver<A> {
     type Resolved = Lookaheads<A>;
 
-    fn tag_count(&self) -> usize { self.tags.len() }
+    fn tag_count(&self) -> u32 { narrow!(self.tags.len()) }
 
-    fn get_predecessors(&self, tag: usize) -> Vec<usize> {
-        self.tags[tag].depends_on.iter().copied().collect_vec()
+    fn get_predecessors(&self, tag: u32) -> Vec<u32> {
+        self.tags[idx!(tag)].depends_on.iter().copied().collect_vec()
     }
 
-    fn resolve_group<'a>(&mut self, tags: impl Iterator<Item=usize>,
+    fn resolve_group<'a>(&mut self, tags: impl Iterator<Item=u32>,
                          predecessors: impl Iterator<Item=Self::Resolved>) -> Self::Resolved {
         let mut resolved = BTreeSet::new();
         for p in predecessors {
             resolved.extend(p.0.iter().cloned());
         }
-        let current = self.resolved.len();
+        let current = narrow!(self.resolved.len());
         for tag in tags {
-            resolved.extend(self.tags[tag].spontaneous.iter().cloned());
-            for &p in &self.tags[tag].depends_on {
-                self.index_map[tag] = current;
-                let p = self.index_map[p];
+            resolved.extend(self.tags[idx!(tag)].spontaneous.iter().cloned());
+            for &p in &self.tags[idx!(tag)].depends_on {
+                self.index_map[idx!(tag)] = current;
+                let p = self.index_map[idx!(p)];
                 if p != current {
-                    resolved.extend(self.resolved[p].iter().cloned());
+                    resolved.extend(self.resolved[idx!(p)].iter().cloned());
                 }
             }
         }
@@ -817,7 +819,7 @@ impl<'a, A: Ord + Clone> TryFrom<&'a KernelSets<'a, A, Lookaheads<A>>> for Table
         let mut action = Vec::new();
         let mut goto = Vec::new();
         let mut errs = Vec::new();
-        for (k, ker) in sets.kernels.iter().enumerate() {
+        for (k, ker) in (0..).zip(sets.kernels.iter()) {
             let mut actions = BTreeMap::new();
             let mut inserter = ActionInserter::new(&mut actions, ker);
             for entry in ker.0.iter() {
@@ -890,7 +892,7 @@ pub mod simulation {
             match self.0 {
                 Parse::Terminal(a) => writeln!(f, "\"{}\"", a),
                 Parse::NonTerminal { symbol, children } => {
-                    writeln!(f, "NT#[ {} ]", self.1[*symbol as usize].as_ref())?;
+                    writeln!(f, "NT#[ {} ]", self.1[idx!(*symbol)].as_ref())?;
                     for child in children.iter() {
                         child.pretty(self.1).fmt_indent(f, indent + 1)?;
                     }
@@ -956,10 +958,10 @@ pub mod simulation {
                     }
                     Action::Reduce { count, symbol } => {
                         let children = parse_stack
-                            .split_off(parse_stack.len() - count as usize)
+                            .split_off(parse_stack.len() - idx!(count))
                             .into_boxed_slice();
                         parse_stack.push(Parse::NonTerminal { symbol, children });
-                        state_stack.truncate(state_stack.len() - count as usize);
+                        state_stack.truncate(state_stack.len() - idx!(count));
                         let s0 = *state_stack.last().unwrap();
                         let t = *self.goto.get((&s0, &symbol)).unwrap();
                         state_stack.push(t);

@@ -132,7 +132,7 @@ pub fn calc_deduce_to_empty<A>(g: &Grammar<A>) -> Box<[bool]> {
         updated = false;
         for (nt, rules) in g.non_terminals().enumerate() {
             let new_val = rules.iter().any(|expr| expr.iter()
-                .all(|x| matches!(x, Symbol::NonTerminal(nt) if res[nt.get()])));
+                .all(|x| matches!(x, Symbol::NonTerminal(nt) if res[idx!(nt.get())])));
             updated |= res[nt] != new_val;
             res[nt] = new_val;
         }
@@ -166,7 +166,7 @@ pub fn append_first_of<'a, A, R, E, C, I>(expr: E, first: &'a [C], deduce_to_emp
                 return false;
             }
             Symbol::NonTerminal(nt) => {
-                let nt = nt.get();
+                let nt = idx!(nt.get());
                 for a in first[nt].borrow() {
                     *updated |= result.insert(a.clone().into());
                 }

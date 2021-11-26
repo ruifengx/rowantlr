@@ -84,11 +84,11 @@
 //! conflict.interpretations.iter().for_each(|ps| {
 //!     // all interpretations is indeed of the same input "aabb".
 //!     assert_eq!("aabb".to_string(), ps.split_last().unwrap().1.iter()
-//!         .map(|&p| result.position_info[p].info.into_normal().unwrap())
+//!         .map(|&p| result.position_info[p as usize].info.into_normal().unwrap())
 //!         .collect::<String>());
 //!     // each position list is chained according to the 'follow_pos' relation.
 //!     ps.windows(2).for_each(|p|
-//!         assert!(result.position_info[p[0]].follow_pos.contains(&p[1])));
+//!         assert!(result.position_info[p[0] as usize].follow_pos.contains(&p[1])));
 //! });
 //! // apply a hint to resolve the conflict.
 //! let mut result = result;
@@ -96,8 +96,8 @@
 //!     ResolveError::Resolved(s) => {
 //!         // we indeed resolved the conflict between tag '0' and tag '1' for input "aabb".
 //!         assert_eq!(2, s.len());
-//!         assert!(matches!(result.position_info[s[0]].info, PosInfo::Accept(0)));
-//!         assert!(matches!(result.position_info[s[1]].info, PosInfo::Accept(1)));
+//!         assert!(matches!(result.position_info[s[0] as usize].info, PosInfo::Accept(0)));
+//!         assert!(matches!(result.position_info[s[1] as usize].info, PosInfo::Accept(1)));
 //!     }
 //!     err => panic!(r#""aabb" should resolve a conflict, but we got {:?} instead"#, err),
 //! }
@@ -330,10 +330,10 @@ pub struct ExprInfo {
     pub nullable: bool,
     /// `firstpos(e)`: the set of positions in `e` which correspond to some symbol `a` such that
     /// `e =>* aβ`, i.e. the symbols appears in the first places of possible sentences in `L(e)`.
-    pub first_pos: BTreeSet<usize>,
+    pub first_pos: BTreeSet<u32>,
     /// `lastpos(e)`: the set of positions in `e` which correspond to some symbol `a` such that
     /// `e =>* βa`, i.e. the symbols appears in the last places of possible sentences in `L(e)`.
-    pub last_pos: BTreeSet<usize>,
+    pub last_pos: BTreeSet<u32>,
 }
 
 impl ExprInfo {
@@ -346,7 +346,7 @@ impl ExprInfo {
     }
 
     /// Information for leaf nodes.
-    pub fn singleton(pos: usize) -> ExprInfo {
+    pub fn singleton(pos: u32) -> ExprInfo {
         let pos = std::iter::once(pos).collect::<BTreeSet<_>>();
         ExprInfo {
             nullable: false,
@@ -411,8 +411,8 @@ impl BitAndAssign for ExprInfo {
 mod tests {
     use super::ExprInfo;
 
-    fn input(nullable: bool, first_pos: impl IntoIterator<Item=usize>,
-             last_pos: impl IntoIterator<Item=usize>) -> ExprInfo {
+    fn input(nullable: bool, first_pos: impl IntoIterator<Item=u32>,
+             last_pos: impl IntoIterator<Item=u32>) -> ExprInfo {
         ExprInfo {
             nullable,
             first_pos: first_pos.into_iter().collect(),
@@ -553,9 +553,9 @@ impl<A: Clone> Expr<A> {
 #[derive(Debug, Clone)]
 pub struct Dfa<A> {
     /// Number of states in this DFA.
-    pub state_count: usize,
+    pub state_count: u32,
     /// Transitions (arcs) of this DFA.
-    pub transitions: Dict<(usize, A, usize)>,
+    pub transitions: Dict<(u32, A, u32)>,
 }
 
 /// DFA related data structures.
@@ -579,7 +579,7 @@ pub mod dfa {
     #[derive(Debug, Eq, PartialEq)]
     pub struct InvalidInput<A, I> {
         /// The last state this [`Dfa`] reaches.
-        pub current_state: usize,
+        pub current_state: u32,
         /// The input character for which the transition function is not defined.
         pub current_input: A,
         /// Possible remaining input.
@@ -589,8 +589,8 @@ pub mod dfa {
     impl<A: Ord> Dfa<A> {
         /// Run this DFA on the specific `input`, starting from some `start_state`.
         /// If no transition is available, return a tuple of state, input char, and rest input.
-        pub fn run<'a, C, I>(&self, start_state: usize, input: I)
-                             -> Result<usize, InvalidInput<C, I::IntoIter>>
+        pub fn run<'a, C, I>(&self, start_state: u32, input: I)
+                             -> Result<u32, InvalidInput<C, I::IntoIter>>
             where A: 'a, C: 'a + Borrow<A>, I: IntoIterator<Item=C> {
             let mut remaining_input = input.into_iter();
             let mut current_state = start_state;
@@ -621,7 +621,7 @@ pub mod dfa {
         /// Whether this state is an accept state.
         pub info: PosInfo<A, Tag>,
         /// The `followpos(p)` set for this position `p`.
-        pub follow_pos: BTreeSet<usize>,
+        pub follow_pos: BTreeSet<u32>,
     }
 
     impl<A, Tag> PosEntry<A, Tag> {
@@ -642,14 +642,14 @@ pub mod dfa {
         fn visit_union(&mut self, _: &ExprInfo, _: &ExprInfo) {}
         fn visit_cat(&mut self, lhs: &ExprInfo, rhs: &ExprInfo) {
             for i in lhs.last_pos.iter().copied() {
-                self.0[i].follow_pos.extend(rhs.first_pos.iter().copied())
+                self.0[idx!(i)].follow_pos.extend(rhs.first_pos.iter().copied())
             }
         }
         fn visit_some(&mut self, x: &ExprInfo) {
             self.visit_cat(x, x)
         }
         fn gen_info(&mut self, p_info: PosInfo<A, Tag>) -> ExprInfo {
-            let info = ExprInfo::singleton(self.0.len());
+            let info = ExprInfo::singleton(narrow!(self.0.len()));
             self.0.push(PosEntry { info: p_info, follow_pos: BTreeSet::new() });
             info
         }
@@ -675,10 +675,12 @@ pub mod dfa {
 
             while let Some((q0, k0)) = queue.pop_front() { // q0: state
                 debug_assert_eq!(state_mapping.get(&q0), Some(&k0));
-                let mut trans = BTreeMap::<A, BTreeSet<usize>>::new();
+                let mut trans = BTreeMap::<A, BTreeSet<u32>>::new();
                 for p in q0.iter().copied() { // p: position
-                    if let PosInfo::Normal(a) = &self.0[p].info {
-                        trans.entry(a.clone()).or_default().extend(&self.0[p].follow_pos);
+                    if let PosInfo::Normal(a) = &self.0[idx!(p)].info {
+                        trans.entry(a.clone())
+                            .or_default()
+                            .extend(&self.0[idx!(p)].follow_pos);
                     }
                 }
                 for (a, q) in trans {
@@ -688,7 +690,7 @@ pub mod dfa {
                         queue.push_back((q.clone(), k));
                         k
                     });
-                    state_transition.insert((k0, a), k);
+                    state_transition.insert((narrow!(k0), a), narrow!(k));
                 }
             }
 
@@ -702,7 +704,7 @@ pub mod dfa {
 
             BuildResult {
                 dfa: Dfa {
-                    state_count: state_mapping.len(),
+                    state_count: narrow!(state_mapping.len()),
                     transitions: state_transition.into_iter()
                         .map(|((s, a), t)| (s, a, t)).collect(),
                 },
@@ -730,24 +732,24 @@ pub mod dfa {
         /// [`built`](Builder::build) from an [`Expr`](super::Expr), and if this reachability
         /// information is generated from [`BuildResult::reachability`], follow this predecessor
         /// should give a shortest path from the initial state to the current state.
-        pub predecessor: Dict<(usize, (usize, A))>,
+        pub predecessor: Dict<(u32, (u32, A))>,
     }
 
     impl<A: Eq> Reachability<A> {
         /// Try to generate a path from the initial state to a specific state.
         /// Every element in the path is a `(state, input)` pair.
-        pub fn try_get_paths_for<Tag>(&self, state: usize, build_result: &BuildResult<A, Tag>)
-                                      -> Option<Vec<Vec<usize>>> {
+        pub fn try_get_paths_for<Tag>(&self, state: u32, build_result: &BuildResult<A, Tag>)
+                                      -> Option<Vec<Vec<u32>>> {
             let mut current_state = state;
-            let mut result_paths = build_result.state_mapping[state].iter()
-                .filter(|&&p| build_result.position_info[p].is_accept())
+            let mut result_paths = build_result.state_mapping[idx!(state)].iter()
+                .filter(|&&p| build_result.position_info[idx!(p)].is_accept())
                 .map(|&p| vec![p]).collect_vec();
             while let Some((pred, a)) = self.predecessor.get((&current_state, )) {
                 for path in &mut result_paths {
                     let last_pos = *path.last().unwrap();
-                    let pos = build_result.state_mapping[*pred].iter().copied()
-                        .find(|&p| build_result.position_info[p].follow_pos.contains(&last_pos)
-                            && build_result.position_info[p].info.as_ref().into_normal() == Some(a))
+                    let pos = build_result.state_mapping[idx!(*pred)].iter().copied()
+                        .find(|&p| build_result.position_info[idx!(p)].follow_pos.contains(&last_pos)
+                            && build_result.position_info[idx!(p)].info.as_ref().into_normal() == Some(a))
                         .unwrap();
                     path.push(pos);
                 }
@@ -765,7 +767,7 @@ pub mod dfa {
         /// The resulted DFA.
         pub dfa: Dfa<A>,
         /// Mapping from DFA states to positions in the original regular expression.
-        pub state_mapping: Vec<BTreeSet<usize>>,
+        pub state_mapping: Vec<BTreeSet<u32>>,
         /// Mapping from [`PosInfo::Accept`] positions to their tags.
         pub position_info: Vec<PosEntry<A, Tag>>,
     }
@@ -773,13 +775,13 @@ pub mod dfa {
     impl<A: Ord + Clone, Tag> BuildResult<A, Tag> {
         /// Calculate reachability information for DFA states.
         pub fn reachability(&self) -> Reachability<A> {
-            let mut predecessor = vec![None; self.dfa.state_count];
+            let mut predecessor = vec![None; idx!(self.dfa.state_count)];
             for (s, a, t) in self.dfa.transitions.iter() {
-                if s == t || predecessor[*t].is_some() { continue; }
-                predecessor[*t] = Some((*s, a.clone()));
+                if s == t || predecessor[idx!(*t)].is_some() { continue; }
+                predecessor[idx!(*t)] = Some((*s, a.clone()));
             }
-            let predecessor = predecessor.into_iter().enumerate()
-                .filter_map(|(k, p)| Some((k, p?))).collect();
+            let predecessor = predecessor.into_iter().zip(0..)
+                .filter_map(|(p, k)| Some((k, p?))).collect();
             Reachability { predecessor }
         }
     }
@@ -790,7 +792,7 @@ pub mod dfa {
         /// The resulted DFA.
         pub dfa: Dfa<A>,
         /// Mapping from states to tags.
-        pub tags: Dict<(usize, Tag)>,
+        pub tags: Dict<(u32, Tag)>,
     }
 
     impl<A: Ord, Tag: Clone> Resolved<A, Tag> {
@@ -830,7 +832,7 @@ pub mod dfa {
                 *t = partitions.parent_part_of(t);
             }
             let transitions = Dict::from(transitions);
-            let dfa = Dfa { state_count: partitions.parts().len(), transitions };
+            let dfa = Dfa { state_count: narrow!(partitions.parts().len()), transitions };
             let mut tags = self.tags.into_raw();
             for (s, _) in tags.iter_mut() {
                 *s = partitions.parent_part_of(s);
@@ -849,7 +851,7 @@ pub mod dfa {
         ///
         /// The last position in each position list is guaranteed to be an [`PosInfo::Accept`]ing
         /// position, and can be used to extract the conflicting tags.
-        pub interpretations: Box<[Box<[usize]>]>,
+        pub interpretations: Box<[Box<[u32]>]>,
     }
 
     impl Conflict {
@@ -857,7 +859,7 @@ pub mod dfa {
         pub fn conflicting_tags<'a, A, Tag>(&'a self, build_result: &'a BuildResult<A, Tag>)
                                             -> impl Iterator<Item=&'a Tag> {
             self.interpretations.iter().map(|ps| {
-                let p = *ps.last().unwrap();
+                let p = idx!(*ps.last().unwrap());
                 build_result.position_info[p].info.as_ref().into_accept().unwrap()
             })
         }
@@ -867,9 +869,9 @@ pub mod dfa {
     #[derive(Debug)]
     pub enum ResolveError<A, Tag, Input> {
         /// No error. Original mapping returned.
-        Resolved(Box<[usize]>),
+        Resolved(Box<[u32]>),
         /// There is only one tag for the input string. Thus there is no conflict at all.
-        NoConflict(usize),
+        NoConflict(u32),
         /// The state for the input string is not an accepted state. This input was refused.
         NotAcceptState(NotAcceptState<Tag>),
         /// The specified input is not defined for this DFA.
@@ -880,7 +882,7 @@ pub mod dfa {
     #[derive(Debug)]
     pub struct NotAcceptState<Tag> {
         /// The index of the state in the [`Dfa`].
-        pub state_index: usize,
+        pub state_index: u32,
         /// The tag intended for that state.
         pub tag_intended: Tag,
     }
@@ -894,19 +896,19 @@ pub mod dfa {
                 Err(err) => return ResolveError::InvalidInput(err),
                 Ok(s) => s,
             };
-            let ps = self.state_mapping[state_index].iter().copied()
-                .filter(|&p| self.position_info[p].is_accept())
+            let ps = self.state_mapping[idx!(state_index)].iter().copied()
+                .filter(|&p| self.position_info[idx!(p)].is_accept())
                 .collect_vec();
             match ps.len() {
                 0 => ResolveError::NotAcceptState(NotAcceptState { state_index, tag_intended }),
                 1 => ResolveError::NoConflict(ps[0]),
                 _ => {
-                    let k = self.position_info.len();
+                    let k = narrow!(self.position_info.len());
                     self.position_info.push(PosEntry {
                         info: PosInfo::Accept(tag_intended),
                         follow_pos: BTreeSet::default(),
                     });
-                    self.state_mapping[state_index] = std::iter::once(k).collect();
+                    self.state_mapping[idx!(state_index)] = std::iter::once(k).collect();
                     ResolveError::Resolved(ps.into_boxed_slice())
                 }
             }
@@ -925,13 +927,13 @@ pub mod dfa {
             let mut result = BTreeMap::new();
             let mut errors = Vec::new();
             let mut reachability = None;
-            for (k, ps) in self.state_mapping.iter().enumerate() {
+            for (ps, k) in self.state_mapping.iter().zip(0..) {
                 let ps = ps.iter().copied()
-                    .filter(|&p| self.position_info[p].is_accept())
+                    .filter(|&p| self.position_info[idx!(p)].is_accept())
                     .collect_vec();
                 match ps.len() {
                     0 => {}
-                    1 => match &self.position_info[ps[0]].info {
+                    1 => match &self.position_info[idx!(ps[0])].info {
                         PosInfo::Accept(tag) => { result.insert(k, tag.clone()); }
                         PosInfo::Normal(_) => unreachable!(),
                     }

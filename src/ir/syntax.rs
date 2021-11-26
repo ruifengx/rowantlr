@@ -19,9 +19,11 @@
 //! IR for grammars: sets of production rules.
 
 use std::fmt::{self, Display, Formatter};
-use std::num::NonZeroUsize;
+use std::num::NonZeroU16;
+
 use derivative::Derivative;
 use itertools::Itertools;
+
 use crate::utils::{by_address, DisplayDot2TeX, simple::DisplayDot2TeX as DisplayDot2TeX_};
 
 /// Terminal and non-terminal symbols.
@@ -61,7 +63,7 @@ impl<A: DisplayDot2TeX<[T]>, T: AsRef<str>> DisplayDot2TeX<[T]> for Symbol<A> {
         match self {
             Symbol::Terminal(t) => write!(f, r"\token{{{}}}", t.display_dot2tex(dict)),
             Symbol::NonTerminal(nt) =>
-                write!(f, r"\NT{{{}}}", dict[nt.get()].as_ref().display_dot2tex_()),
+                write!(f, r"\NT{{{}}}", dict[idx!(nt.get())].as_ref().display_dot2tex_()),
         }
     }
 }
@@ -111,7 +113,7 @@ pub fn epsilon<A>() -> Expr<A> { Box::new([]) as _ }
 #[derivative(PartialOrd(bound = ""), Ord(bound = ""))]
 #[derivative(Clone(bound = ""), Copy(bound = ""))]
 pub struct CaretExpr<'a, A> {
-    caret: usize,
+    caret: u16,
     #[derivative(PartialEq(compare_with = "by_address::eq"))]
     #[derivative(PartialOrd(compare_with = "by_address::partial_cmp"))]
     #[derivative(Ord(compare_with = "by_address::cmp"))]
@@ -127,8 +129,8 @@ impl<'a, A> From<&'a Expr<A>> for CaretExpr<'a, A> {
 impl<'a, A: Display> Display for CaretExpr<'a, A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{} . {}",
-               self.components[..self.caret].iter().format(" "),
-               self.components[self.caret..].iter().format(" "))
+               self.components[..idx!(self.caret)].iter().format(" "),
+               self.components[idx!(self.caret)..].iter().format(" "))
     }
 }
 
@@ -170,8 +172,8 @@ impl<'a, A> CaretExpr<'a, A> {
     /// });
     /// ```
     pub fn step(self) -> Option<(&'a Symbol<A>, Self)> {
-        if self.caret == self.components.len() { return None; }
-        Some((&self.components[self.caret], CaretExpr {
+        if idx!(self.caret) == self.components.len() { return None; }
+        Some((&self.components[idx!(self.caret)], CaretExpr {
             caret: self.caret + 1,
             components: self.components,
         }))
@@ -203,7 +205,7 @@ impl<'a, A> CaretExpr<'a, A> {
     ///     assert_eq!(&[Terminal('a')], c_expr.consumed_part());
     /// });
     /// ```
-    pub fn consumed_part(&self) -> &[Symbol<A>] { &self.components[..self.caret] }
+    pub fn consumed_part(&self) -> &[Symbol<A>] { &self.components[..idx!(self.caret)] }
 
     /// Symbols yet to consume.
     ///
@@ -218,13 +220,13 @@ impl<'a, A> CaretExpr<'a, A> {
     ///     assert_eq!(&[NonTerminal(nt), Terminal('b')], c_expr.rest_part());
     /// });
     /// ```
-    pub fn rest_part(&self) -> &[Symbol<A>] { &self.components[self.caret..] }
+    pub fn rest_part(&self) -> &[Symbol<A>] { &self.components[idx!(self.caret)..] }
 }
 
 /// Wrapped non-terminal, subscript into [`Grammar`]s.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[must_use = "non-terminals should be added to RHS of other non-terminals or marked as start symbol"]
-pub struct NonTerminalIdx(NonZeroUsize);
+pub struct NonTerminalIdx(NonZeroU16);
 
 impl Display for NonTerminalIdx {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -233,7 +235,7 @@ impl Display for NonTerminalIdx {
 }
 
 impl NonTerminalIdx {
-    pub(crate) fn get(self) -> usize { self.0.get() }
+    pub(crate) fn get(self) -> u16 { self.0.get() }
 }
 
 /// Builder for [`Grammar`]s.
@@ -254,14 +256,14 @@ impl<A> GrammarBuilder<A> {
 
     /// Add a new non-terminal.
     pub fn add_non_terminal(&mut self) -> NonTerminalIdx {
-        let nt = self.rules.len();
+        let nt = narrow!(self.rules.len());
         self.rules.push(Vec::new());
-        NonTerminalIdx(NonZeroUsize::new(nt).unwrap())
+        NonTerminalIdx(NonZeroU16::new(nt).unwrap())
     }
 
     /// Add many new non-terminals all at once.
     pub fn add_non_terminals<const N: usize>(&mut self) -> [NonTerminalIdx; N] {
-        let mut res = [NonTerminalIdx(NonZeroUsize::new(42).unwrap()); N];
+        let mut res = [NonTerminalIdx(NonZeroU16::new(42).unwrap()); N];
         for nt in &mut res {
             *nt = self.add_non_terminal();
         }
@@ -270,7 +272,7 @@ impl<A> GrammarBuilder<A> {
 
     /// Add a new production rule to a non-terminal.
     pub fn add_rule(&mut self, nt: NonTerminalIdx, rule: Expr<A>) {
-        self.rules[nt.get()].push(rule)
+        self.rules[idx!(nt.get())].push(rule)
     }
 
     /// Mark a non-terminal symbol as a start symbol.
@@ -285,10 +287,10 @@ impl<A> GrammarBuilder<A> {
         let mut all_rules = Vec::new();
         let mut indices = Vec::new();
         for mut rules in self.rules {
-            indices.push(all_rules.len());
+            indices.push(narrow!(all_rules.len()));
             all_rules.append(&mut rules);
         }
-        indices.push(all_rules.len());
+        indices.push(narrow!(all_rules.len()));
         Grammar {
             all_rules: all_rules.into_boxed_slice(),
             indices: indices.into_boxed_slice(),
@@ -300,7 +302,7 @@ impl<A> GrammarBuilder<A> {
 /// appearing in RHS of any production rules.
 pub struct Grammar<A> {
     all_rules: Box<[Expr<A>]>,
-    indices: Box<[usize]>,
+    indices: Box<[u32]>,
 }
 
 impl<A> Grammar<A> {
@@ -325,20 +327,20 @@ impl<A> Grammar<A> {
 
     /// All the generation rules for the start symbol `S` (indexed 0).
     pub fn start_rules(&self) -> &[Expr<A>] {
-        &self.all_rules[self.indices[0]..self.indices[1]]
+        &self.all_rules[idx!(self.indices[0])..idx!(self.indices[1])]
     }
 
     /// Iterate over all the production rules in the grammar.
     pub fn rules_of(&self, nt: NonTerminalIdx) -> &[Expr<A>] {
-        let l = self.indices[nt.get()];
-        let r = self.indices[nt.get() + 1];
-        &self.all_rules[l..r]
+        let l = self.indices[idx!(nt.get())];
+        let r = self.indices[idx!(nt.get() + 1)];
+        &self.all_rules[idx!(l)..idx!(r)]
     }
 
     /// Iterate over all the production rules grouped by non-terminals.
     pub fn non_terminals(&self) -> impl Iterator<Item=&[Expr<A>]> + '_ {
         self.indices.iter().copied()
             .zip(self.indices.iter().copied().dropping(1))
-            .map(move |(l, r)| &self.all_rules[l..r])
+            .map(move |(l, r)| &self.all_rules[idx!(l)..idx!(r)])
     }
 }

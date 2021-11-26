@@ -62,19 +62,19 @@ use crate::utils::partition_refinement::{IndexManager, Part, Partitions};
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub struct Interval {
     /// Lower-bound (inclusive).
-    pub start: usize,
+    pub start: u32,
     /// Upper-bound (exclusive).
-    pub end: usize,
+    pub end: u32,
 }
 
 impl Interval {
     #[inline(always)]
     fn from_range<R>(range: R) -> Self
-        where R: RangeBounds<usize> {
+        where R: RangeBounds<u32> {
         let start = match range.start_bound() {
             Bound::Included(&start) => start,
             Bound::Excluded(&start) => start + 1,
-            Bound::Unbounded => usize::MIN,
+            Bound::Unbounded => u32::MIN,
         };
         let end = match range.end_bound() {
             Bound::Included(&end) => end + 1,
@@ -107,16 +107,16 @@ macro_rules! interval_from_range {
 }
 
 interval_from_range! {
-    Range<usize>,
-    RangeInclusive<usize>,
-    RangeTo<usize>,
-    RangeToInclusive<usize>,
+    Range<u32>,
+    RangeInclusive<u32>,
+    RangeTo<u32>,
+    RangeToInclusive<u32>,
     // RangeFrom & RangeFull are open on the right
 }
 
-impl RangeBounds<usize> for Interval {
-    fn start_bound(&self) -> Bound<&usize> { Bound::Included(&self.start) }
-    fn end_bound(&self) -> Bound<&usize> { Bound::Excluded(&self.end) }
+impl RangeBounds<u32> for Interval {
+    fn start_bound(&self) -> Bound<&u32> { Bound::Included(&self.start) }
+    fn end_bound(&self) -> Bound<&u32> { Bound::Excluded(&self.end) }
 }
 
 /// Interval set.
@@ -179,7 +179,7 @@ impl Intervals {
     /// # use rowantlr::utils::interval::Intervals;
     /// # use rowantlr::utils::partition_refinement::Partitions;
     /// let mut intervals: Intervals;
-    /// let mut partitions: Partitions<usize>;
+    /// let mut partitions: Partitions<u64>;
     /// # intervals = Intervals::new();
     /// # partitions = Partitions::new_trivial(7);
     /// # partitions.refine_with([1, 3, 5], &mut intervals);
