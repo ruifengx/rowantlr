@@ -46,6 +46,9 @@
 //!     assert_eq!(partitions.parts().len(), 5);
 //!     assert_equal(partitions.parts(), [&[2, 0], &[1, 3], &[6], &[5], &[4]]);
 //! }
+//! // random access to parts is also possible
+//! assert_eq!(partitions.part(1), &[1, 3]);
+//! assert_eq!(partitions.part(4), &[4]);
 //! ```
 //!
 //! Use [`Intervals`] to collect all newly-generated parts during the refinement:

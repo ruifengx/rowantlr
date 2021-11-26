@@ -226,7 +226,14 @@ impl<Env: ?Sized> DisplayDot2TeX<Env> for str {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::simple::DisplayDot2TeX;
+    use super::simple::DisplayDot2TeX;
+
+    #[test]
+    #[should_panic(expected = "narrowing 'too_large' (= 300) to u8 failed")]
+    fn test_narrow() {
+        let too_large = 300_usize;
+        let _ = narrow!(too_large => u8);
+    }
 
     #[test]
     fn test_str_fmt_dot2tex() {
