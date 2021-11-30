@@ -315,7 +315,7 @@ impl<A> BitAnd for Expr<A> {
 impl Expr<char> {
     /// Union of all the characters in some string.
     pub fn any_of(s: &str) -> Self {
-        Expr::union(s.chars().map(Expr::singleton))
+        Expr::union_of(s.chars())
     }
 }
 
@@ -326,8 +326,8 @@ impl<'a> From<&'a str> for Expr<char> {
 }
 
 impl<A> Expr<A> {
-    /// Union of all the elements in some array.
-    pub fn union_of<const N: usize>(s: [A; N]) -> Self {
+    /// Union of all the elements in some iterator.
+    pub fn union_of<I: IntoIterator<Item=A>>(s: I) -> Self {
         Expr::union(s.into_iter().map(Expr::singleton))
     }
 }
@@ -585,6 +585,8 @@ pub mod dfa {
     use crate::utils::Dict;
     use crate::utils::interval::Intervals;
     use crate::utils::partition_refinement::{IndexManager, Partitions};
+
+    use super::char_class::Char;
     use super::{Dfa, ExprInfo, ExprVisitor, PosInfo};
 
     /// Invalid input for some [`Dfa`].
@@ -867,6 +869,67 @@ pub mod dfa {
                 .collect::<Dict<_>>()
                 .groups::<2>()
                 .for_each(|(_, g)| inputs.refine_with(g, &mut ()));
+        }
+    }
+
+    impl Dfa<u32> {
+        /// Refine the inputs of this DFA with the partitions obtained by [`Dfa::classify_inputs`].
+        ///
+        /// ```
+        /// # use rowantlr::ir::lexical::{Expr, char_class::{Char, CharClass}};
+        /// # use rowantlr::utils::partition_refinement::Partitions;
+        /// // auxiliary function for constructing a singleton of a char class:
+        /// fn char_class<C: Into<CharClass>>(c: C) -> Expr<CharClass> { Expr::singleton(c.into()) }
+        /// // a lexical grammar, whose input can be further refined after DFA generation:
+        /// let many_a_or_many_b = Expr::union([ // equivalent to '(a | b)*'
+        ///     Expr::many(char_class('a')), // a*
+        ///     Expr::many(char_class('b')), // b*
+        /// ]);
+        /// let (expr, mut classifier) = Expr::freeze_char_class([&many_a_or_many_b]);
+        /// // 'a' and 'b' are distinguishable at the very beginning
+        /// assert_ne!(classifier.classify((&Char::from('a'), )),
+        ///            classifier.classify((&Char::from('b'), )));
+        /// // resolve, minimise, and refine
+        /// let expr = {
+        ///     assert_eq!(expr.len(), 1);
+        ///     expr.into_iter().next().unwrap()
+        /// };
+        /// let resolved = expr.build().try_resolve().unwrap();
+        /// let minimised = resolved.clone().minimise();
+        /// let (refined, refined_classifier) = {
+        ///     let (mut minimised, mut classifier) = (minimised.clone(), classifier.clone());
+        ///     let input_count = 1 + classifier.values::<1>().copied().max().unwrap();
+        ///     let mut inputs = Partitions::new_trivial(input_count);
+        ///     minimised.dfa.classify_input(&mut inputs);
+        ///     minimised.dfa.refine_input(&inputs, &mut classifier);
+        ///     (minimised, classifier)
+        /// };
+        /// // 'a' and 'b' now becomes indistinguishable according to the refined DFA
+        /// assert_eq!(refined_classifier.classify((&Char::from('a'), )),
+        ///            refined_classifier.classify((&Char::from('b'), )));
+        /// // equivalence of the DFA before and after minimisation, as well as after refinement
+        /// for (m, c) in [(&resolved, &classifier),
+        ///                (&minimised, &classifier),
+        ///                (&refined, &refined_classifier)] {
+        ///     let idx = |x: char| c.classify((&Char::from(x), ));
+        ///     let run = |s: &str| m.run(s.chars().map(idx)).unwrap();
+        ///     assert_eq!(Some(()), run(""));
+        ///     assert_eq!(Some(()), run("a"));
+        ///     assert_eq!(Some(()), run("aaa"));
+        ///     assert_eq!(Some(()), run("bb"));
+        /// }
+        /// ```
+        pub fn refine_input(&mut self, inputs: &Partitions<u32>, classifier: &mut Dict<(Char, u32)>) {
+            let mut transitions = std::mem::take(&mut self.transitions).into_raw().into_vec();
+            for (_, a, _) in &mut transitions {
+                *a = inputs.parent_part_of(a);
+            }
+            self.transitions = Dict::from(transitions);
+            let mut class = std::mem::take(classifier).into_raw().into_vec();
+            for (_, k) in &mut class {
+                *k = inputs.parent_part_of(k);
+            }
+            *classifier = Dict::from(class);
         }
     }
 

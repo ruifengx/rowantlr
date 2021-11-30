@@ -22,6 +22,7 @@ use std::any::type_name;
 use std::iter::FromIterator;
 use std::fmt::{Display, Formatter};
 use std::ops::{Bound, RangeBounds};
+use derivative::Derivative;
 use tuple::{TupleBorrow, TupleCompare, TupleRest, TupleRotate, TupleSplit};
 
 /// Literals for boxed slices. Equivalent to `vec![...].into_boxed_slice()`.
@@ -357,6 +358,8 @@ impl<I: Iterator> IterHelper for I {}
 /// }
 /// ```
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct Dict<K>(Box<[K]>);
 
 struct SingularRange<A>(A);
