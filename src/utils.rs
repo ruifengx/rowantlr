@@ -456,6 +456,43 @@ impl<K> Dict<K> {
         Some(self.0[p].borrow_rest())
     }
 
+    /// Treat this dict as a classifier, by considering the keys as split points, and values as
+    /// class tags for the group between the current split point (inclusive) to the next split
+    /// point (exclusive). Get the class tag for some specific element.
+    ///
+    /// Panics if the input "underflows" the classifier, i.e. the smallest split point is still
+    /// greater than the provided input, and the class tag for that specific input is therefore
+    /// not well-defined.
+    ///
+    /// Below is an example usage of the classifiers obtained from [`Expr::freeze_char_class`]:
+    /// ```
+    /// # use rowantlr::utils::Dict;
+    /// // auxiliary function for finding the next char:
+    /// fn next_char(c: char) -> char { char::from_u32(c as u32 + 1).unwrap() }
+    /// // the classifier:
+    /// let chars = Dict::from([
+    ///     ('\0', 0_u32),
+    ///     ('$',  1), (next_char('$'),  0),
+    ///     ('\'', 2), (next_char('\''), 0),
+    ///     ('0',  2), (next_char('9'),  0),
+    ///     ('A',  3), (next_char('Z'),  0),
+    ///     ('_',  4), (next_char('_'),  0),
+    ///     ('a',  4), (next_char('z'),  0),
+    /// ]);
+    /// // we can get the class tag for any character:
+    /// assert_eq!(*chars.classify((&'x', )), 4);
+    /// assert_eq!(*chars.classify((&'7', )), 2);
+    /// assert_eq!(*chars.classify((&'#', )), 0);
+    /// assert_eq!(*chars.classify((&'$', )), 1);
+    /// ```
+    ///
+    /// [`Expr::freeze_char_class`]: crate::ir::lexical::Expr::freeze_char_class
+    pub fn classify<'a, Q>(&'a self, key: Q) -> K::Rest
+        where K: TupleCompare<Q>, K: TupleRest<'a, Q> {
+        let p = Self::locate_upper_bound(&self.0, Bound::Included(&key));
+        self.0[p.checked_sub(1).expect("classifier underflow")].borrow_rest()
+    }
+
     /// Returns the key-value pair corresponding to the supplied key.
     /// If multiple entries exist, an unspecified one is returned.
     pub fn get_key_value<Q>(&self, key: Q) -> Option<&K>

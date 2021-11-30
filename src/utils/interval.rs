@@ -162,6 +162,8 @@ impl Intervals {
     /// [`PartManager`] for the input partition refinement structure.
     ///
     /// For a non-mutating method, refer to [`parts`](Intervals::parts).
+    ///
+    /// [`PartManager`]: crate::utils::partition_refinement::PartManager
     pub fn pop_part<E, P>(&mut self, partitions: &Partitions<E, P>) -> Option<Part>
         where P: IndexManager<E> {
         let last = self.0.last_mut()?;

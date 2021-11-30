@@ -56,7 +56,7 @@
 //! # use itertools::assert_equal;
 //! # use rowantlr::utils::interval::Intervals;
 //! # use rowantlr::utils::partition_refinement::Partitions;
-//! let mut partitions = Partitions::new_trivial(7);
+//! let mut partitions = Partitions::<u64>::new_trivial(7);
 //! let mut intervals = Intervals::new();
 //! partitions.refine_with([1, 3, 5], &mut intervals); { // 0 6 2 4 | 5 3 1
 //!     assert_equal(&intervals, &[4..7]);
@@ -166,7 +166,7 @@ pub struct Partitions<E, P = TrivialIdxMan<E>> {
 impl<E> Partitions<E, TrivialIdxMan<E>> {
     /// Initialise for partition refinement with the [`TrivialIdxMan`].
     ///
-    /// Equivalent to [`Partitions::new`], but might help with type inference and/or efficiency.
+    /// Equivalent to [`Partitions::new`], but might help with efficiency.
     /// ```
     /// # use rowantlr::utils::partition_refinement::Partitions;
     /// assert_eq!(Partitions::new_trivial(6), Partitions::<u64>::new((0..6).collect()));

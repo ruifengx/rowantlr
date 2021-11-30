@@ -21,7 +21,7 @@
 //! - Use the [`Expr`] API to construct regular expressions;
 //! - Use [`Expr::build`], [`dfa::BuildResult::try_resolve`] to build DFAs;
 //! - Run a DFA on some input with [`Dfa::run`] and [`dfa::Resolved::run`];
-//! - Minimise a DFA with [`Dfa::minimise`];
+//! - Minimise a DFA with [`dfa::Resolved::minimise`];
 //!
 //! Below is an example:
 //!
@@ -137,6 +137,8 @@
 //! assert_eq!(minimised.dfa.state_count, 2);
 //! ```
 
+pub mod char_class;
+
 use std::collections::BTreeSet;
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Deref, DerefMut};
 use crate::utils::{Dict, IterHelper};
@@ -159,11 +161,11 @@ impl<A> DerefMut for Expr<A> {
 pub enum Op<A, R> {
     /// `{ a }` is a regular language.
     Singleton(A),
-    /// Union.
+    /// Union: `L ∪ R` is regular if both `L` and `R` are regular.
     Union(Vec<R>),
-    /// Concatenation.
+    /// Concatenation: `L . R` is regular if both `L` and `R` are regular.
     Concat(Vec<R>),
-    /// Positive closure (`+`).
+    /// Positive closure: `L+` is regular if `L` is regular.
     Some(Box<R>),
 }
 
@@ -320,6 +322,19 @@ impl Expr<char> {
 impl<'a> From<&'a str> for Expr<char> {
     fn from(s: &str) -> Self {
         Expr::concat(s.chars().map(Expr::singleton))
+    }
+}
+
+impl<A> Expr<A> {
+    /// Union of all the elements in some array.
+    pub fn union_of<const N: usize>(s: [A; N]) -> Self {
+        Expr::union(s.into_iter().map(Expr::singleton))
+    }
+}
+
+impl<A, const N: usize> From<[A; N]> for Expr<A> {
+    fn from(s: [A; N]) -> Self {
+        Expr::concat(s.into_iter().map(Expr::singleton))
     }
 }
 
@@ -569,7 +584,7 @@ pub mod dfa {
 
     use crate::utils::Dict;
     use crate::utils::interval::Intervals;
-    use crate::utils::partition_refinement::Partitions;
+    use crate::utils::partition_refinement::{IndexManager, Partitions};
     use super::{Dfa, ExprInfo, ExprVisitor, PosInfo};
 
     /// Invalid input for some [`Dfa`].
@@ -839,6 +854,19 @@ pub mod dfa {
             }
             let tags = Dict::from(tags);
             Resolved { dfa, tags }
+        }
+    }
+
+    impl<A> Dfa<A> {
+        /// Group the input tokens by the transition arcs they belong to.
+        /// Input `a` on arc `(s, a, t)` is classified according to key `(s, t)`.
+        pub fn classify_input<P>(&self, inputs: &mut Partitions<A, P>)
+            where A: Ord + Clone, P: IndexManager<A> {
+            self.transitions.iter().cloned()
+                .map(|(s, a, t)| (s, t, a))
+                .collect::<Dict<_>>()
+                .groups::<2>()
+                .for_each(|(_, g)| inputs.refine_with(g, &mut ()));
         }
     }
 
