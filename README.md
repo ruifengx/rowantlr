@@ -5,6 +5,7 @@
 [![CI](https://github.com/ruifengx/rowantlr/actions/workflows/build.yaml/badge.svg)](https://github.com/ruifengx/rowantlr/actions/workflows/build.yaml)
 [![docs](https://img.shields.io/badge/Doc-GitHub%20Pages-brightgreen)](https://ruifengx.github.io/rowantlr/)
 [![Coverage Status](https://coveralls.io/repos/github/ruifengx/rowantlr/badge.svg?branch=master)](https://coveralls.io/github/ruifengx/rowantlr?branch=master)
+[![Dependency Status](https://deps.rs/repo/github/ruifengx/rowantlr/status.svg)](https://deps.rs/repo/github/ruifengx/rowantlr)
 ![version](https://img.shields.io/badge/WIP-0.1-yellow)
 
 ## License
