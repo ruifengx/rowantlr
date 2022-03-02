@@ -70,8 +70,8 @@ jobs:
         override: true
         profile: minimal
         components: llvm-tools-preview
-    - name: Install grcov
-      run: curl -LsSf https://github.com/taiki-e/cargo-llvm-cov/releases/latest/download/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz | tar xzf - -C ~/.cargo/bin
+    - name: Install llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
     - name: Generate coverage report
       uses: actions-rs/cargo@v1
       with:
