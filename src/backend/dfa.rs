@@ -57,7 +57,7 @@
 //!
 //! ```
 //! use rowantlr::ir::lexical::{Expr, PosInfo};
-//! use rowantlr::backend::dfa::{ResolveError, InvalidInput};
+//! use rowantlr::backend::dfa::ResolveError;
 //! // start with 'a', end with 'b'
 //! let e1 = Expr::concat([
 //!     Expr::singleton('a'),
@@ -121,7 +121,6 @@
 //! how the DFA can have equivalent states and be properly minimised:
 //! ```
 //! use rowantlr::ir::lexical::Expr;
-//! use rowantlr::backend::dfa::InvalidInput;
 //! let expr = Expr::union([
 //!     Expr::some(Expr::singleton('a')), // a+
 //!     Expr::some(Expr::from("aa")),     // (aa)+

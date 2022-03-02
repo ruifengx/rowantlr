@@ -67,11 +67,10 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         toolchain: nightly
-        override: true
         profile: minimal
         components: llvm-tools-preview
     - name: Install llvm-cov
-      uses: taiki-e/install-action@cargo-llvm-cov
+      run: cargo install --git https://github.com/taiki-e/cargo-llvm-cov --branch disable-remap-path-prefix cargo-llvm-cov
     - name: Generate coverage report
       uses: actions-rs/cargo@v1
       with:
