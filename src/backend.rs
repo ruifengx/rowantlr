@@ -18,5 +18,6 @@
 
 //! All the possible backends for rowantlr.
 
+pub mod dfa;
 pub mod ll1;
 pub mod lalr1;

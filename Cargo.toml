@@ -12,6 +12,6 @@ description = "An ANTLR like parser generator framework targeting rowan."
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-itertools = "0.10"
-derivative = "2.2"
-indoc = "1.0"
+itertools = "0.10.3"
+derivative = "2.2.0"
+indoc = "1.0.3"
