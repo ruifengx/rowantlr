@@ -150,7 +150,7 @@ use crate::utils::Dict;
 use crate::utils::interval::Intervals;
 use crate::utils::partition_refinement::{IndexManager, Partitions};
 use crate::ir::lexical::char_class::Char;
-use crate::ir::lexical::{Expr, ExprInfo, ExprVisitor, PosInfo};
+use crate::ir::lexical::{Expr, ExprInfo, ExprVisitor, ExprVisitorExt, PosInfo};
 
 /// Definite Finite State Automata.
 #[derive(Debug, Clone)]
@@ -225,9 +225,16 @@ impl<A, Tag> Builder<A, Tag> {
     pub fn new() -> Self { Builder::default() }
     /// Finish by getting the collected information. See also [`Builder::build`].
     pub fn finish(self) -> Vec<PosEntry<A, Tag>> { self.0 }
+
+    fn gen_info(&mut self, p_info: PosInfo<A, Tag>) -> ExprInfo {
+        let info = ExprInfo::singleton(narrow!(self.0.len()));
+        self.0.push(PosEntry { info: p_info, follow_pos: BTreeSet::new() });
+        info
+    }
 }
 
-impl<A, Tag> ExprVisitor<A, Tag> for Builder<A, Tag> {
+impl<A, Tag> ExprVisitor<A> for Builder<A, Tag> {
+    type Output = ExprInfo;
     fn visit_union(&mut self, _: &ExprInfo, _: &ExprInfo) {}
     fn visit_cat(&mut self, lhs: &ExprInfo, rhs: &ExprInfo) {
         for i in lhs.last_pos.iter().copied() {
@@ -237,10 +244,15 @@ impl<A, Tag> ExprVisitor<A, Tag> for Builder<A, Tag> {
     fn visit_some(&mut self, x: &ExprInfo) {
         self.visit_cat(x, x)
     }
-    fn gen_info(&mut self, p_info: PosInfo<A, Tag>) -> ExprInfo {
-        let info = ExprInfo::singleton(narrow!(self.0.len()));
-        self.0.push(PosEntry { info: p_info, follow_pos: BTreeSet::new() });
-        info
+
+    fn map_null(&mut self) -> ExprInfo { ExprInfo::default() }
+    fn map_epsilon(&mut self) -> ExprInfo { ExprInfo { nullable: true, ..ExprInfo::default() } }
+    fn map_singleton(&mut self, a: A) -> ExprInfo { self.gen_info(PosInfo::Normal(a)) }
+}
+
+impl<A, Tag> ExprVisitorExt<A, Tag> for Builder<A, Tag> {
+    fn map_accept(&mut self, tag: Tag) -> ExprInfo {
+        self.gen_info(PosInfo::Accept(tag))
     }
 }
 

@@ -26,7 +26,7 @@ use crate::utils::IterHelper;
 
 /// Regular expressions.
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
-pub struct Expr<A>(Op<A, Expr<A>>);
+pub struct Expr<A>(pub(crate) Op<A, Expr<A>>);
 
 impl<A> Deref for Expr<A> {
     type Target = Op<A, Expr<A>>;
@@ -375,56 +375,61 @@ impl<A, Tag> PosInfo<A, Tag> {
 }
 
 /// Recursive visitor for [`Expr`]s.
-pub trait ExprVisitor<A, Tag> {
-    /// Visit a `or-node`, part of an [`Op::Union`].
-    fn visit_union(&mut self, lhs: &ExprInfo, rhs: &ExprInfo);
-    /// Visit a `cat-node`, part of an [`Op::Concat`].
-    fn visit_cat(&mut self, lhs: &ExprInfo, rhs: &ExprInfo);
-    /// Visit a `some-node`, i.e. an [`Op::Some`].
-    fn visit_some(&mut self, x: &ExprInfo);
-    /// Visit a leaf node, i.e. an [`Op::Singleton`].
-    fn gen_info(&mut self, a: PosInfo<A, Tag>) -> ExprInfo;
+pub trait ExprVisitor<A> {
+    /// Output of this expression visitor.
+    type Output: BitAnd<Output=Self::Output> + BitOr<Output=Self::Output>;
 
-    /// Visit a leaf node, i.e. an [`Op::Singleton`].
-    fn gen_singleton_info(&mut self, a: A) -> ExprInfo {
-        self.gen_info(PosInfo::Normal(a))
-    }
-    /// Visit a leaf node, i.e. an [`Op::Singleton`].
-    fn gen_accept_info(&mut self, t: Tag) -> ExprInfo {
-        self.gen_info(PosInfo::Accept(t))
-    }
+    /// Visit a `or-node`, part of an [`Op::Union`].
+    fn visit_union(&mut self, lhs: &Self::Output, rhs: &Self::Output);
+    /// Visit a `cat-node`, part of an [`Op::Concat`].
+    fn visit_cat(&mut self, lhs: &Self::Output, rhs: &Self::Output);
+    /// Visit a `some-node`, i.e. an [`Op::Some`].
+    fn visit_some(&mut self, x: &Self::Output);
+
+    /// Visit an `∅-node` (null node), essentially an [`Op::Union`] with zero children.
+    fn map_null(&mut self) -> Self::Output;
+    /// Visit an `ε-node` (empty node), essentially an [`Op::Concat`] with zero children.
+    fn map_epsilon(&mut self) -> Self::Output;
+    /// Visit a normal leaf node, i.e. an [`Op::Singleton`].
+    fn map_singleton(&mut self, a: A) -> Self::Output;
     /// Visit a `cat-node`, part of an [`Op::Concat`].
     /// More control on how [`ExprInfo`]s are merged.
-    fn map_cat(&mut self, lhs: ExprInfo, rhs: ExprInfo) -> ExprInfo {
+    fn map_cat(&mut self, lhs: Self::Output, rhs: Self::Output) -> Self::Output {
         self.visit_cat(&lhs, &rhs);
         lhs & rhs
     }
     /// Visit a `or-node`, part of an [`Op::Union`].
     /// More control on how [`ExprInfo`]s are merged.
-    fn map_union(&mut self, lhs: ExprInfo, rhs: ExprInfo) -> ExprInfo {
+    fn map_union(&mut self, lhs: Self::Output, rhs: Self::Output) -> Self::Output {
         self.visit_union(&lhs, &rhs);
         lhs | rhs
     }
     /// Visit a `some-node`, i.e. an [`Op::Some`].
     /// More control on how the [`ExprInfo`] is transformed.
-    fn map_some(&mut self, x: ExprInfo) -> ExprInfo {
+    fn map_some(&mut self, x: Self::Output) -> Self::Output {
         self.visit_some(&x);
         x
     }
 }
 
+/// Recursive visitor for [`Expr`]s, with additional ability to handle phantom accept nodes.
+pub trait ExprVisitorExt<A, Tag>: ExprVisitor<A> {
+    /// Visit a phantom accept node.
+    fn map_accept(&mut self, t: Tag) -> Self::Output;
+}
+
 impl<A: Clone> Expr<A> {
-    fn traverse<Tag>(visitor: &mut impl ExprVisitor<A, Tag>, expr: &Expr<A>) -> ExprInfo {
+    fn traverse_impl<V: ExprVisitor<A>>(visitor: &mut V, expr: &Expr<A>) -> V::Output {
         match expr.deref() {
-            Op::Singleton(a) => visitor.gen_singleton_info(a.clone()),
+            Op::Singleton(a) => visitor.map_singleton(a.clone()),
             Op::Union(xs) => xs.iter()
-                .reduce_map(visitor, Expr::traverse, ExprVisitor::map_union)
-                .unwrap_or_default(),
+                .reduce_map(visitor, Expr::traverse_impl, V::map_union)
+                .unwrap_or_else(|| visitor.map_null()),
             Op::Concat(xs) => xs.iter()
-                .reduce_map(visitor, Expr::traverse, ExprVisitor::map_cat)
-                .unwrap_or_else(|| ExprInfo { nullable: true, ..ExprInfo::default() }),
+                .reduce_map(visitor, Expr::traverse_impl, V::map_cat)
+                .unwrap_or_else(|| visitor.map_epsilon()),
             Op::Some(x) => {
-                let x = Expr::traverse(visitor, x);
+                let x = Expr::traverse_impl(visitor, x);
                 visitor.map_some(x)
             }
         }
@@ -432,15 +437,15 @@ impl<A: Clone> Expr<A> {
 
     /// Traverse the expression tree, building up [`ExprInfo`] on the fly, and use the
     /// information during the traversal.
-    pub fn traverse_with_info<Tag>(&self, visitor: &mut impl ExprVisitor<A, Tag>) -> ExprInfo {
-        Expr::traverse(visitor, self)
+    pub fn traverse<V: ExprVisitor<A>>(&self, visitor: &mut V) -> V::Output {
+        Expr::traverse_impl(visitor, self)
     }
 
     /// For regular expression `e`, collect the information as if we are traversing the extended
     /// regular expression `e#` (where `# ∉ Σ`).
-    pub fn traverse_extended<Tag>(&self, visitor: &mut impl ExprVisitor<A, Tag>, tag: Tag) -> ExprInfo {
-        let main = self.traverse_with_info(visitor);
-        let acc = visitor.gen_accept_info(tag);
+    pub fn traverse_extended<Tag, V: ExprVisitorExt<A, Tag>>(&self, visitor: &mut V, tag: Tag) -> V::Output {
+        let main = self.traverse(visitor);
+        let acc = visitor.map_accept(tag);
         visitor.map_cat(main, acc)
     }
 }
