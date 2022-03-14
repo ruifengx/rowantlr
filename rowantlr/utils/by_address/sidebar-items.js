@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["cmp","Fast-forward to [`Ord`] for pointers. To be used by `Derivative`."],["eq","Fast-forward to [`PartialOrd`] for pointers. To be used by `Derivative`."],["partial_cmp","Fast-forward to [`PartialOrd`] for pointers. To be used by `Derivative`."]]});

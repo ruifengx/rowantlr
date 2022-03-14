@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Groups","Double-ended iterator for borrowed values in a `Dict`, grouped by their keys."]],"type":[["Iter","Double-ended iterator into a `Dict`."],["Keys","Double-ended iterator for borrowed keys in a `Dict`."],["Values","Double-ended iterator for borrowed values in a `Dict`."]]});

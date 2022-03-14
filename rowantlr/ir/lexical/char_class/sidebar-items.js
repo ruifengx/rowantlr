@@ -1,0 +1,1 @@
+initSidebarItems({"struct":[["Char","Wrapper for [`u32`] as characters and off-by-one characters. [`CharClass`]es are left-closed right-open intervals, so right end points of the intervals are not necessarily valid [`char`]s."],["CharClass","Character range."]]});

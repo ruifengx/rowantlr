@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["Parse","Parse tree: result of simulation of `LALR(1)`."]],"struct":[["ParseError","A parse error."],["Pretty","Pretty print for parse trees."]]});

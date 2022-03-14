@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["rowantlr"] = [{"text":"impl&lt;'a, A, Tag&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/1.59.0/core/borrow/trait.Borrow.html\" title=\"trait core::borrow::Borrow\">Borrow</a>&lt;<a class=\"struct\" href=\"rowantlr/backend/lalr1/struct.Rule.html\" title=\"struct rowantlr::backend::lalr1::Rule\">Rule</a>&lt;'a, A&gt;&gt; for <a class=\"struct\" href=\"rowantlr/backend/lalr1/struct.Entry.html\" title=\"struct rowantlr::backend::lalr1::Entry\">Entry</a>&lt;'a, A, Tag&gt;","synthetic":false,"types":["rowantlr::backend::lalr1::Entry"]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

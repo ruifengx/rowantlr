@@ -1,0 +1,1 @@
+initSidebarItems({"macro":[["box","Literals for boxed slices. Equivalent to `vec![...].into_boxed_slice()`."],["display_dot2tex_via_display","Declares a set of types that are safe to display as `dot2tex` format directly via [`Display`]."]],"mod":[["backend","All the possible backends for rowantlr."],["ir","Intermediate Representations."],["utils","Common utilities."]]});

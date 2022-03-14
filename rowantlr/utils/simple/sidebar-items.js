@@ -1,0 +1,1 @@
+initSidebarItems({"trait":[["DisplayDot2TeX","Provide short-cut methods for [`DisplayDot2TeX`] with a nullary environment."]]});
